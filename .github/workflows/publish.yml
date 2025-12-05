@@ -75,7 +75,7 @@ jobs:
         with:
           name: ocr-binaries
           # This puts the binaries where Gradle will include them in the JAR
-          path: Suwayomi-Server/server/src/main/resources/ocr-binaries
+          path: master/Suwayomi-Server/server/src/main/resources/ocr-binaries
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -88,7 +88,7 @@ jobs:
 
       - name: Copy CI gradle.properties
         run: |
-          cd master
+          cd master/Suwayomi-Server
           mkdir -p ~/.gradle
           cp .github/runner-files/ci-gradle.properties \
             ~/.gradle/gradle.properties
@@ -96,7 +96,7 @@ jobs:
       - name: Build and copy webUI, Build Jar
         env:
           ProductBuildType: "Stable"
-        working-directory: master
+        working-directory: master/Subwayomi-Server
         # ShadowJar will automatically pick up the files in src/main/resources
         run: ./gradlew :server:downloadWebUI :server:shadowJar --stacktrace
 
@@ -104,18 +104,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jar
-          path: Suwayomi-Server/server/build/*.jar
+          path: master/Suwayomi-Server/server/build/*.jar
           if-no-files-found: error
 
       - name: Upload icons
         uses: actions/upload-artifact@v4
         with:
           name: icon
-          path: Suwayomi-Server/server/src/main/resources/icon
+          path: master/Suwayomi-Server/server/src/main/resources/icon
           if-no-files-found: error
 
       - name: Tar scripts dir to maintain file permissions
-        run: tar -cvzf scripts.tar.gz -C master/ scripts/
+        run: tar -cvzf scripts.tar.gz -C master/Subwayomi-Server/ scripts/
 
       - name: Upload scripts.tar.gz
         uses: actions/upload-artifact@v4
