@@ -19,6 +19,7 @@ use reqwest::Client;
 use rust_embed::RustEmbed;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tokio::process::Command;
+use tower_http::cors::{Any, CorsLayer};
 use tray_icon::{
     TrayIconBuilder,
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
@@ -142,6 +143,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🌍 Starting Web Interface at http://localhost:8080");
     let client = Client::new();
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
     let app = Router::new()
         .route("/api/ocr", any(proxy_ocr_handler))
@@ -149,11 +154,14 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/ocr/{*path}", any(proxy_ocr_handler))
         .route("/api/{*path}", any(proxy_suwayomi_handler))
         .fallback(serve_react_app)
+        .layer(cors)
         .with_state(client);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
 
     let server_future = axum::serve(listener, app).into_future();
+
+    let _ = open::that("http://localhost:8080");
 
     tokio::select! {
         status = suwayomi_proc.wait() => {
