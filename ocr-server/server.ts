@@ -1,13 +1,19 @@
 // @ts-nocheck
 import express from "express";
 import multer from "multer";
-// Import Core directly to avoid loading 'sharp' references in the main file
 import LensCore from "npm:chrome-lens-ocr@^4.1.0/src/core.js";
-import { Image } from "imagescript";
 import { parse } from "std/flags/mod.ts";
 import { resolve, join, dirname } from "std/path/mod.ts";
 import { existsSync, ensureDirSync } from "std/fs/mod.ts";
 import { Buffer } from "node:buffer";
+
+// Import ImageMagick WASM (Portable, no native system dependencies)
+import {
+    ImageMagick,
+    initializeImageMagick,
+    MagickFormat,
+    MagickGeometry,
+} from "https://deno.land/x/imagemagick_deno/mod.ts";
 
 // --- Configuration & Setup ---
 
@@ -46,7 +52,7 @@ const AUTO_MERGE_CONFIG = {
   add_space_on_merge: false,
 };
 
-// --- Auto-Merge Logic ---
+// --- Auto-Merge Logic (UnionFind & Helper Functions) ---
 
 class UnionFind {
   constructor(size) {
@@ -360,7 +366,7 @@ app.use((req, res, next) => {
 app.get("/", (req, res) => {
   res.json({
     status: "running",
-    message: "Deno OCR Server (Imagescript)",
+    message: "Deno OCR Server (ImageMagick/WASM)",
     requests_processed: ocrRequestsProcessed,
     items_in_cache: ocrCache.size,
   });
@@ -391,74 +397,92 @@ app.get("/ocr", async (req, res) => {
     const arrayBuffer = await response.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);
 
-    // 2. Decode Image using ImageScript (WASM)
-    const image = await Image.decode(uint8Array);
-    const fullWidth = image.width;
-    const fullHeight = image.height;
-
-    const MAX_CHUNK_HEIGHT = 3000;
     let allFinalResults = [];
 
-    // 3. Chunking Logic
-    if (fullHeight > MAX_CHUNK_HEIGHT) {
-      console.log(`[OCR] Image tall (${fullHeight}px). Chunking...`);
-      for (let yOffset = 0; yOffset < fullHeight; yOffset += MAX_CHUNK_HEIGHT) {
-        const currentTop = Math.round(yOffset);
-        if (currentTop >= fullHeight) continue;
+    // 2. Decode & Process Image using ImageMagick WASM
+    // ImageMagick.read is synchronous-like inside the callback.
+    // We collect the chunks (buffers) first, then process them async with Lens later.
+    const chunkTasks = [];
+    let fullWidth = 0;
+    let fullHeight = 0;
+    const MAX_CHUNK_HEIGHT = 3000;
 
-        let chunkHeight = Math.min(MAX_CHUNK_HEIGHT, fullHeight - currentTop);
-        if (currentTop + chunkHeight > fullHeight) {
-          chunkHeight = fullHeight - currentTop;
+    await new Promise((resolve, reject) => {
+      ImageMagick.read(uint8Array, (image) => {
+        try {
+          fullWidth = image.width;
+          fullHeight = image.height;
+
+          if (fullHeight > MAX_CHUNK_HEIGHT) {
+            console.log(`[OCR] Image tall (${fullHeight}px). Chunking...`);
+            for (let yOffset = 0; yOffset < fullHeight; yOffset += MAX_CHUNK_HEIGHT) {
+              const currentTop = Math.round(yOffset);
+              if (currentTop >= fullHeight) continue;
+
+              let chunkHeight = Math.min(MAX_CHUNK_HEIGHT, fullHeight - currentTop);
+              if (currentTop + chunkHeight > fullHeight) {
+                chunkHeight = fullHeight - currentTop;
+              }
+              if (chunkHeight <= 0) continue;
+
+              // Clone and Crop
+              image.clone((chunk) => {
+                const geom = new MagickGeometry(0, currentTop, fullWidth, chunkHeight);
+                chunk.crop(geom);
+                
+                // Write to PNG buffer
+                chunk.write(MagickFormat.Png, (data) => {
+                   chunkTasks.push({
+                     buffer: data,
+                     yOffset: currentTop,
+                     height: chunkHeight
+                   });
+                });
+              });
+            }
+          } else {
+             // Process as single image, but convert to PNG to ensure format compatibility (e.g. from WebP)
+             image.write(MagickFormat.Png, (data) => {
+                chunkTasks.push({
+                   buffer: data,
+                   yOffset: 0,
+                   height: fullHeight
+                });
+             });
+          }
+          resolve();
+        } catch (e) {
+          reject(e);
         }
-        if (chunkHeight <= 0) continue;
+      });
+    });
 
-        // ImageScript: crop(x, y, w, h)
-        // Clone is safest to avoid mutation issues
-        const chunk = image.clone().crop(0, currentTop, fullWidth, chunkHeight);
-        
-        // Encode to PNG (returns Uint8Array)
-        const chunkBuffer = await chunk.encode();
-        
-        // Convert to Base64 for Google Lens
-        const b64 = Buffer.from(chunkBuffer).toString("base64");
-        const dataUrl = `data:image/png;base64,${b64}`;
-
-        const rawChunkResults = transformOcrData(await lens.scanByURL(dataUrl));
-        let mergedChunkResults = rawChunkResults;
-
-        if (AUTO_MERGE_CONFIG.enabled && rawChunkResults.length > 0) {
-          mergedChunkResults = autoMergeOcrData(
-            rawChunkResults,
-            fullWidth,
-            chunkHeight,
-            AUTO_MERGE_CONFIG
-          );
-        }
-
-        // Adjust coordinates back to global image space
-        mergedChunkResults.forEach((result) => {
-          const bbox = result.tightBoundingBox;
-          const yGlobalPx = bbox.y * chunkHeight + currentTop;
-          bbox.y = yGlobalPx / fullHeight;
-          bbox.height = (bbox.height * chunkHeight) / fullHeight;
-          allFinalResults.push(result);
-        });
-      }
-    } else {
-      // Small image, process directly
-      const b64 = Buffer.from(uint8Array).toString("base64");
+    // 3. Process Chunks with Google Lens (Async)
+    // We do this outside the ImageMagick closure to support async/await
+    for (const task of chunkTasks) {
+      const b64 = Buffer.from(task.buffer).toString("base64");
       const dataUrl = `data:image/png;base64,${b64}`;
-      
-      const rawResults = transformOcrData(await lens.scanByURL(dataUrl));
-      allFinalResults = rawResults;
-      if (AUTO_MERGE_CONFIG.enabled && rawResults.length > 0) {
-        allFinalResults = autoMergeOcrData(
-          rawResults,
+
+      const rawChunkResults = transformOcrData(await lens.scanByURL(dataUrl));
+      let mergedChunkResults = rawChunkResults;
+
+      if (AUTO_MERGE_CONFIG.enabled && rawChunkResults.length > 0) {
+        mergedChunkResults = autoMergeOcrData(
+          rawChunkResults,
           fullWidth,
-          fullHeight,
+          task.height,
           AUTO_MERGE_CONFIG
         );
       }
+
+      // Adjust coordinates back to global image space
+      mergedChunkResults.forEach((result) => {
+        const bbox = result.tightBoundingBox;
+        const yGlobalPx = bbox.y * task.height + task.yOffset;
+        bbox.y = yGlobalPx / fullHeight;
+        bbox.height = (bbox.height * task.height) / fullHeight;
+        allFinalResults.push(result);
+      });
     }
 
     ocrRequestsProcessed++;
@@ -480,7 +504,29 @@ app.post("/purge-cache", (req, res) => {
 });
 
 // --- Server Start ---
-app.listen(port, host, () => {
-  loadCacheFromFile();
-  console.log(`Deno OCR Server running at http://${host}:${port}`);
-});
+
+// 1. Manually load the WASM binary
+// We use a direct URL so Deno can find it even when compiled.
+// Ensure this version matches your imagemagick_deno version!
+const wasmUrl = "https://cdn.jsdelivr.net/npm/@imagemagick/magick-wasm@0.0.31/dist/magick.wasm";
+
+try {
+  const wasmResponse = await fetch(wasmUrl);
+  if (!wasmResponse.ok) {
+    throw new Error(`Failed to fetch WASM: ${wasmResponse.statusText}`);
+  }
+  const wasmBytes = new Uint8Array(await wasmResponse.arrayBuffer());
+
+  // 2. Initialize ImageMagick with the specific bytes
+  await initializeImageMagick(wasmBytes);
+  
+  // 3. Start App
+  app.listen(port, host, () => {
+    loadCacheFromFile();
+    console.log(`Deno OCR Server running at http://${host}:${port}`);
+  });
+
+} catch (error) {
+  console.error("Failed to initialize ImageMagick:", error);
+  Deno.exit(1);
+}
