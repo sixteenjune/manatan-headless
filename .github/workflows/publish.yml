@@ -240,22 +240,28 @@ jobs:
           name: mangatan-macOS-arm64
           path: release/mac-silicon
 
-      - name: Prepare Assets with Versioning
+- name: Prepare Assets with Versioning
         run: |
           mkdir final_release
-          # Capture version from tag (e.g. v1.0.0)
           VERSION=${{ github.ref_name }}
           
-          # Move and Rename using the Version
-          mv release/linux/mangatan final_release/Mangatan-${VERSION}-Linux-x64
+          # WINDOWS (Keep as .exe)
           mv release/windows/mangatan.exe final_release/Mangatan-${VERSION}-Windows-x64.exe
-          mv release/mac-intel/mangatan final_release/Mangatan-${VERSION}-macOS-Intel
-          mv release/mac-silicon/mangatan final_release/Mangatan-${VERSION}-macOS-Silicon
           
-          # Make binaries executable
-          chmod +x final_release/Mangatan-${VERSION}-Linux-x64
-          chmod +x final_release/Mangatan-${VERSION}-macOS-Intel
-          chmod +x final_release/Mangatan-${VERSION}-macOS-Silicon
+          # LINUX (Tarball preserves permissions)
+          chmod +x release/linux/mangatan
+          tar -czvf final_release/Mangatan-${VERSION}-Linux-x64.tar.gz -C release/linux mangatan
+          
+          # MACOS INTEL (Zip preserves permissions)
+          chmod +x release/mac-intel/mangatan
+          # We rename it inside the zip so the user extracts a file named "Mangatan"
+          mv release/mac-intel/mangatan release/mac-intel/Mangatan
+          cd release/mac-intel && zip ../../final_release/Mangatan-${VERSION}-macOS-Intel.zip Mangatan && cd -
+          
+          # MACOS SILICON (Zip preserves permissions)
+          chmod +x release/mac-silicon/mangatan
+          mv release/mac-silicon/mangatan release/mac-silicon/Mangatan
+          cd release/mac-silicon && zip ../../final_release/Mangatan-${VERSION}-macOS-Silicon.zip Mangatan && cd -
 
       - name: Generate Checksums
         run: cd final_release && sha256sum * > Checksums.sha256
