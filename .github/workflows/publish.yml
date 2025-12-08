@@ -54,6 +54,9 @@ jobs:
           java-version: 21 # SWITCHED TO LTS (25 is EA and breaks scanners)
           distribution: 'zulu'
 
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Package JDK
         run: make jlink
 
