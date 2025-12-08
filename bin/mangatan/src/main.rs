@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     thread,
-    time::Duration,
 };
 
 use anyhow::anyhow;
@@ -24,7 +23,7 @@ use eframe::{
 use futures::TryStreamExt;
 use reqwest::Client;
 use rust_embed::RustEmbed;
-use tokio::{process::Command, sync::mpsc, time::sleep};
+use tokio::{process::Command, sync::mpsc};
 use tower_http::cors::{Any, CorsLayer};
 
 const ICON_BYTES: &[u8] = include_bytes!("../resources/faviconlogo.png");

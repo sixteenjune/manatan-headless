@@ -27,17 +27,10 @@ jobs:
       - name: Compile OCR Server
         run: |
           mkdir -p ocr-server/dist
-          
-          # Linux x64
-          cd ocr-server && deno compile --allow-net --allow-read --allow-write --allow-env --target x86_64-unknown-linux-gnu --output dist/ocr-server-linux server.ts
-          
-          # Windows x64
+          cd ocr-server 
+          deno compile --allow-net --allow-read --allow-write --allow-env --target x86_64-unknown-linux-gnu --output dist/ocr-server-linux server.ts
           deno compile --allow-net --allow-read --allow-write --allow-env --target x86_64-pc-windows-msvc --output dist/ocr-server-win.exe server.ts
-          
-          # macOS Intel (x64)
           deno compile --allow-net --allow-read --allow-write --allow-env --target x86_64-apple-darwin --output dist/ocr-server-macos-x64 server.ts
-
-          # macOS Apple Silicon (ARM64)
           deno compile --allow-net --allow-read --allow-write --allow-env --target aarch64-apple-darwin --output dist/ocr-server-macos-arm64 server.ts
 
       - name: Upload OCR Artifacts
@@ -46,7 +39,7 @@ jobs:
           name: ocr-binaries
           path: ocr-server/dist/*
 
-  # --- JOB 2: Build Custom JREs (Required for embedding) ---
+  # --- JOB 2: Build Custom JREs ---
   jlink:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -60,8 +53,6 @@ jobs:
             name: macOS-arm64
           - os: macos-13
             name: macOS-x64
-        os: [ubuntu-latest, windows-latest, macos-14, macos-13]
-
     steps:
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -78,7 +69,7 @@ jobs:
           name: ${{ matrix.name }}-jre
           path: suwa
 
-  # --- JOB 3: Build Mangatan Launcher (The All-in-One Binary) ---
+  # --- JOB 3: Build Mangatan Launcher & Bundling ---
   build_mangatan:
     name: Build Mangatan (${{ matrix.name }})
     needs: [build_ocr, jlink]
@@ -90,28 +81,24 @@ jobs:
           - name: Linux-x64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary_name: mangatan
             arch_name: linux-x64
             ocr_binary: ocr-server-linux
             
           - name: Windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary_name: mangatan.exe
             arch_name: windows-x64
             ocr_binary: ocr-server-win.exe
             
           - name: macOS-Intel
             os: macos-13
             target: x86_64-apple-darwin
-            binary_name: mangatan
             arch_name: macOS-x64
             ocr_binary: ocr-server-macos-x64
             
           - name: macOS-Silicon
             os: macos-14
             target: aarch64-apple-darwin
-            binary_name: mangatan
             arch_name: macOS-arm64
             ocr_binary: ocr-server-macos-arm64
 
@@ -123,7 +110,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libappindicator3-dev librsvg2-dev libxdo-dev
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libappindicator3-dev librsvg2-dev libxdo-dev fuse
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -132,14 +119,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true             
+          cache-on-failure: true
 
       # --- ASSET PREPARATION ---
       - name: Create Resources Directory
         shell: bash
         run: mkdir -p bin/mangatan/resources
 
-      # 1. OCR Binary
       - name: Download OCR Binaries
         uses: actions/download-artifact@v4
         with:
@@ -150,7 +136,6 @@ jobs:
         shell: bash
         run: cp temp_ocr/${{ matrix.ocr_binary }} bin/mangatan/resources/
 
-      # 2. JRE Bundle
       - name: Download JRE
         uses: actions/download-artifact@v4
         with:
@@ -161,59 +146,212 @@ jobs:
         shell: bash
         run: |
           cd temp_jre
-          # Cross-platform zip logic
           if [ "${{ runner.os }}" == "Windows" ]; then
             7z a -tzip ../bin/mangatan/resources/jre_bundle.zip *
           else
             zip -r ../bin/mangatan/resources/jre_bundle.zip .
           fi
 
-      # 3. Suwayomi JAR (Specified URL)
       - name: Download Suwayomi JAR
         shell: bash
-        run: |
-          curl -L "https://github.com/Suwayomi/Suwayomi-Server-preview/releases/download/v2.1.2019/Suwayomi-Server-v2.1.2019.jar" -o bin/mangatan/resources/Suwayomi-Server.jar
+        run: curl -L "https://github.com/Suwayomi/Suwayomi-Server-preview/releases/download/v2.1.2019/Suwayomi-Server-v2.1.2019.jar" -o bin/mangatan/resources/Suwayomi-Server.jar
 
-      # 4. WebUI (Robust Unzip)
       - name: Download and Setup WebUI
         shell: bash
         run: |
-          # 1. Download
           curl -L "https://github.com/KolbyML/Suwayomi-WebUI/releases/download/v1.0.7/Suwayomi-WebUI-v1.0.7.zip" -o webui.zip
-          
-          # 2. Unzip to a temporary staging folder
           mkdir webui_temp
           unzip webui.zip -d webui_temp
-          
-          # 3. Create destination
           mkdir -p bin/mangatan/resources/suwayomi-webui
-
-          # 4. Move files (Handle both Nested Folder and Flat Zip cases)
-          # If the temp folder contains exactly one directory, move THAT directory's contents
           if [ $(ls -1 webui_temp | wc -l) -eq 1 ] && [ -d "webui_temp/$(ls webui_temp)" ]; then
-            echo "Detected nested folder in zip. Moving contents..."
             mv webui_temp/$(ls webui_temp)/* bin/mangatan/resources/suwayomi-webui/
           else
-            echo "Detected flat zip. Moving contents..."
             mv webui_temp/* bin/mangatan/resources/suwayomi-webui/
           fi
-
-          # 5. Cleanup
           rm -rf webui_temp webui.zip
 
       # --- COMPILATION ---
-      - name: Build Rust Binary
+      - name: Build Binary
         shell: bash
         run: |
           cd bin/mangatan
           cargo build --release --target ${{ matrix.target }} --features embed-jre
 
-      - name: Upload Artifact
+      # --- WINDOWS PACKAGING (Zip with Mesa DLLs) ---
+      - name: Package Windows with Mesa
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir output
+          
+          # 1. Move EXE to output
+          cp bin/mangatan/target/${{ matrix.target }}/release/mangatan.exe output/
+          
+          # 2. Download and Extract Mesa 3D
+          echo "Fetching latest Mesa version..."
+          MESA_TAG=$(curl -s https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest | jq -r .tag_name)
+          echo "Detected Mesa version: $MESA_TAG"
+          
+          curl -L -o mesa.7z "https://github.com/pal1000/mesa-dist-win/releases/download/${MESA_TAG}/mesa3d-windows-${MESA_TAG}.7z"
+          
+          # Extract using 7z (Standard on Windows Actions)
+          7z x mesa.7z -omesa_dist
+          
+          # 3. Copy required DLLs from x64 folder
+          echo "Copying Mesa DLLs..."
+          cp mesa_dist/x64/opengl32.dll output/
+          cp mesa_dist/x64/libgallium_wgl.dll output/
+          
+          # Try to copy d3d10warp.dll if it exists (it's not always in the pack, but requested)
+          if [ -f "mesa_dist/x64/d3d10warp.dll" ]; then
+             cp mesa_dist/x64/d3d10warp.dll output/
+          else
+             echo "Warning: d3d10warp.dll not found in Mesa package. Skipping."
+          fi
+          
+          # 4. Zip the folder contents
+          cd output
+          7z a -tzip ../mangatan-windows-x64.zip *
+          cd ..
+          
+          # Prepare artifact path for upload
+          mkdir final_artifact
+          mv mangatan-windows-x64.zip final_artifact/
+
+      # --- LINUX PACKAGING (Manual Deb & AppImage) ---
+      - name: Package Linux (Deb & AppImage)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          BINARY_PATH="bin/mangatan/target/${{ matrix.target }}/release/mangatan"
+          ICON_PATH="bin/mangatan/resources/faviconlogo.png"
+          VERSION="${{ github.ref_name }}"
+          CLEAN_VERSION=$(echo $VERSION | sed 's/^v//')
+          
+          mkdir -p output
+          
+          # --- DEB ---
+          mkdir -p deb_pkg/usr/bin deb_pkg/usr/share/applications deb_pkg/usr/share/icons/hicolor/512x512/apps deb_pkg/DEBIAN
+          cp "$BINARY_PATH" deb_pkg/usr/bin/mangatan
+          cp "$ICON_PATH" deb_pkg/usr/share/icons/hicolor/512x512/apps/mangatan.png
+          chmod +x deb_pkg/usr/bin/mangatan
+          
+          cat > deb_pkg/DEBIAN/control <<EOF
+          Package: mangatan
+          Version: $CLEAN_VERSION
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Mangatan Team
+          Description: Mangatan Server
+           A robust manga server application.
+          EOF
+          
+          cat > deb_pkg/usr/share/applications/mangatan.desktop <<EOF
+          [Desktop Entry]
+          Name=Mangatan
+          Exec=/usr/bin/mangatan
+          Icon=mangatan
+          Type=Application
+          Categories=Utility;
+          Terminal=false
+          EOF
+          
+          dpkg-deb --build deb_pkg output/mangatan_${CLEAN_VERSION}_amd64.deb
+          
+          # --- APPIMAGE ---
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp "$BINARY_PATH" AppDir/usr/bin/mangatan
+          cp "$ICON_PATH" AppDir/mangatan.png
+          cp "$ICON_PATH" AppDir/usr/share/icons/hicolor/256x256/apps/mangatan.png
+          
+          cat > AppDir/mangatan.desktop <<EOF
+          [Desktop Entry]
+          Name=Mangatan
+          Exec=mangatan
+          Icon=mangatan
+          Type=Application
+          Categories=Utility;
+          Terminal=false
+          EOF
+          
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
+          mv Mangatan*.AppImage output/
+
+      # --- MACOS PACKAGING (Manual .app Bundle) ---
+      - name: Package macOS (.app)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          BINARY_PATH="bin/mangatan/target/${{ matrix.target }}/release/mangatan"
+          ICON_PATH="bin/mangatan/resources/faviconlogo.png"
+          APP_NAME="Mangatan"
+          BUNDLE_DIR="${APP_NAME}.app"
+          
+          mkdir -p output
+          mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Resources"
+          cp "$BINARY_PATH" "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+          chmod +x "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+          
+          cat > "$BUNDLE_DIR/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>$APP_NAME</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.mangatan.server</string>
+              <key>CFBundleName</key>
+              <string>$APP_NAME</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSUIElement</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
+          
+          mkdir mangatan.iconset
+          sips -z 16 16     "$ICON_PATH" --out mangatan.iconset/icon_16x16.png
+          sips -z 32 32     "$ICON_PATH" --out mangatan.iconset/icon_16x16@2x.png
+          sips -z 32 32     "$ICON_PATH" --out mangatan.iconset/icon_32x32.png
+          sips -z 64 64     "$ICON_PATH" --out mangatan.iconset/icon_32x32@2x.png
+          sips -z 128 128   "$ICON_PATH" --out mangatan.iconset/icon_128x128.png
+          sips -z 256 256   "$ICON_PATH" --out mangatan.iconset/icon_128x128@2x.png
+          sips -z 256 256   "$ICON_PATH" --out mangatan.iconset/icon_256x256.png
+          sips -z 512 512   "$ICON_PATH" --out mangatan.iconset/icon_256x256@2x.png
+          sips -z 512 512   "$ICON_PATH" --out mangatan.iconset/icon_512x512.png
+          iconutil -c icns mangatan.iconset
+          mv mangatan.icns "$BUNDLE_DIR/Contents/Resources/AppIcon.icns"
+          
+          zip -r "output/${APP_NAME}.app.zip" "$BUNDLE_DIR"
+
+      # --- UPLOAD ARTIFACTS ---
+      - name: Upload Windows Artifact
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: mangatan-${{ matrix.arch_name }}
-          path: |
-            target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+          path: final_artifact/mangatan-windows-x64.zip
+
+      - name: Upload Linux Artifacts
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mangatan-${{ matrix.arch_name }}
+          path: output/*
+
+      - name: Upload macOS Artifacts
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mangatan-${{ matrix.arch_name }}
+          path: output/Mangatan.app.zip
 
   # --- JOB 4: Release ---
   release:
@@ -245,28 +383,21 @@ jobs:
           name: mangatan-macOS-arm64
           path: release/mac-silicon
 
-      - name: Prepare Assets with Versioning
+      - name: Prepare Final Assets
         run: |
           mkdir final_release
           VERSION=${{ github.ref_name }}
           
-          # WINDOWS (Keep as .exe)
-          mv release/windows/mangatan.exe final_release/Mangatan-${VERSION}-Windows-x64.exe
+          # WINDOWS (Now a Zip)
+          mv release/windows/mangatan-windows-x64.zip final_release/Mangatan-${VERSION}-Windows-x64.zip
           
-          # LINUX (Tarball preserves permissions)
-          chmod +x release/linux/mangatan
-          tar -czvf final_release/Mangatan-${VERSION}-Linux-x64.tar.gz -C release/linux mangatan
+          # LINUX
+          mv release/linux/*.deb final_release/Mangatan-${VERSION}-Linux-x64.deb
+          mv release/linux/*.AppImage final_release/Mangatan-${VERSION}-Linux-x64.AppImage
           
-          # MACOS INTEL (Zip preserves permissions)
-          chmod +x release/mac-intel/mangatan
-          # We rename it inside the zip so the user extracts a file named "Mangatan"
-          mv release/mac-intel/mangatan release/mac-intel/Mangatan
-          cd release/mac-intel && zip ../../final_release/Mangatan-${VERSION}-macOS-Intel.zip Mangatan && cd -
-          
-          # MACOS SILICON (Zip preserves permissions)
-          chmod +x release/mac-silicon/mangatan
-          mv release/mac-silicon/mangatan release/mac-silicon/Mangatan
-          cd release/mac-silicon && zip ../../final_release/Mangatan-${VERSION}-macOS-Silicon.zip Mangatan && cd -
+          # MACOS
+          mv release/mac-intel/Mangatan.app.zip final_release/Mangatan-${VERSION}-macOS-Intel.app.zip
+          mv release/mac-silicon/Mangatan.app.zip final_release/Mangatan-${VERSION}-macOS-Silicon.app.zip
 
       - name: Generate Checksums
         run: cd final_release && sha256sum * > Checksums.sha256
