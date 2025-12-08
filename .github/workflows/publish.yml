@@ -251,42 +251,6 @@ jobs:
           
           dpkg-deb --build deb_pkg output/mangatan_${CLEAN_VERSION}_amd64.deb
           
-          # --- APPIMAGE ---
-          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
-          
-          # Copy files
-          cp "$BINARY_PATH" AppDir/usr/bin/mangatan
-          cp "$ICON_PATH" AppDir/mangatan.png
-          cp "$ICON_PATH" AppDir/usr/share/icons/hicolor/256x256/apps/mangatan.png
-          
-          # Ensure Binary is Executable
-          chmod +x AppDir/usr/bin/mangatan
-          
-          # Desktop File
-          cat > AppDir/mangatan.desktop <<EOF
-          [Desktop Entry]
-          Name=Mangatan
-          Exec=mangatan
-          Icon=mangatan
-          Type=Application
-          Categories=Utility;
-          Terminal=false
-          EOF
-          
-          # Setup LinuxDeploy
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
-          
-          # FIX: Explicitly tell linuxdeploy where the executable and desktop file are
-          ./linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            --executable AppDir/usr/bin/mangatan \
-            --desktop-file AppDir/mangatan.desktop \
-            --icon-file AppDir/mangatan.png \
-            --output appimage
-          
-          mv Mangatan*.AppImage output/
-
       # --- MACOS PACKAGING ---
       - name: Package macOS (.app)
         if: runner.os == 'macOS'
@@ -400,7 +364,6 @@ jobs:
           
           # LINUX
           mv release/linux/*.deb final_release/Mangatan-${VERSION}-Linux-x64.deb
-          # mv release/linux/*.AppImage final_release/Mangatan-${VERSION}-Linux-x64.AppImage
           
           # MACOS
           mv release/mac-intel/Mangatan.app.zip final_release/Mangatan-${VERSION}-macOS-Intel.app.zip
