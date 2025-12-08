@@ -324,6 +324,9 @@ async fn serve_react_app(uri: Uri) -> impl IntoResponse {
 
 fn extract_file(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
     let path = dir.join(name);
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
     let mut file = File::create(&path)?;
     file.write_all(bytes)?;
     Ok(path)
