@@ -32,6 +32,12 @@ Run the executable, then visit http://127.0.0.1:4568/ in your web browser to acc
 
 ### Prerequisites
 
+#### Windows
+
+```ps
+winget install Microsoft.OpenJDK.21 DenoLand.Deno
+```
+
 #### MacOS
 
 ```bash
