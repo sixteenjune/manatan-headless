@@ -114,10 +114,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
       # --- ASSET PREPARATION ---
       - name: Create Resources Directory
         shell: bash
