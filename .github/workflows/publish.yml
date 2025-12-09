@@ -88,7 +88,6 @@ jobs:
           cd Suwayomi-WebUI
           yarn install --frozen-lockfile
           yarn build
-          # We don't need 'yarn build-zip' because we want the raw files for the artifact
 
       - name: Upload WebUI Artifact
         uses: actions/upload-artifact@v4
@@ -291,6 +290,11 @@ jobs:
     needs: [build_mangatan]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  
+
       - name: Download Linux
         uses: actions/download-artifact@v4
         with:
@@ -333,9 +337,35 @@ jobs:
       - name: Generate Checksums
         run: cd final_release && sha256sum * > Checksums.sha256
 
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          CURRENT_TAG=${{ github.ref_name }}
+          echo "Generating release notes for $CURRENT_TAG"
+          
+          # Find the tag before this one
+          PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)
+          
+          # Start writing the file
+          echo "## Release $CURRENT_TAG" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "### Initial Release" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            git log --no-merges --pretty=format:"- %s (%h)" >> RELEASE_NOTES.md
+          else
+            echo "### Changes since $PREV_TAG" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            git log "$PREV_TAG..$CURRENT_TAG" --no-merges --pretty=format:"- %s (%h)" >> RELEASE_NOTES.md
+          fi
+          
+          cat RELEASE_NOTES.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: true
+          body_path: RELEASE_NOTES.md
           files: final_release/*
