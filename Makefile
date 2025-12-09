@@ -1,3 +1,4 @@
+SHELL := /bin/bash
 
 .PHONY: test
 test: # Run all tests.
@@ -26,6 +27,24 @@ sort: # Run `cargo sort` on the entire workspace.
 clean-deps: # Run `cargo udeps`
 	cargo +nightly udeps --workspace --tests --all-targets --release
 
+.PHONY: build_webui
+build_webui:
+	@echo "Building WebUI (Enforcing Node 22.12.0)..."
+	# 1. Try to source NVM and use Node 22.12.0. 
+	#    This setup assumes standard NVM installation path.
+	@export NVM_DIR="$$HOME/.nvm"; \
+	if [ -s "$$NVM_DIR/nvm.sh" ]; then \
+		. "$$NVM_DIR/nvm.sh"; \
+		nvm install 22.12.0; \
+		nvm use 22.12.0; \
+	else \
+		echo "Warning: NVM not found. Using system node version:"; \
+		node -v; \
+	fi; \
+	cd Suwayomi-WebUI && yarn install && yarn build
+	rm -r bin/mangatan/resources/suwayomi-webui
+	mkdir -p bin/mangatan/resources/suwayomi-webui
+	cp -r Suwayomi-WebUI/build/* bin/mangatan/resources/suwayomi-webui/
 
 .PHONY: build-ocr-binaries
 build-ocr-binaries:
@@ -46,8 +65,8 @@ build-ocr-binaries:
 	cd ocr-server && deno compile --allow-net --allow-read --allow-write --allow-env --target aarch64-apple-darwin --output dist/ocr-server-macos-arm64 server.ts
 
 .PHONY: dev
-dev: build-ocr-binaries
-	./dev.sh
+dev: build-ocr-binaries build_webui
+	cargo run --release -p mangatan
 
 .PHONY: jlink
 jlink:
