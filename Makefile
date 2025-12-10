@@ -95,7 +95,7 @@ bundle_jre: jlink
 download_jar:
 	@echo "Downloading Suwayomi Server JAR..."
 	mkdir -p bin/mangatan/resources
-	curl -L "https://github.com/Suwayomi/Suwayomi-Server-preview/releases/download/v2.1.2019/Suwayomi-Server-v2.1.2019.jar" -o bin/mangatan/resources/Suwayomi-Server.jar
+	curl -L "https://github.com/Suwayomi/Suwayomi-Server-preview/releases/download/v2.1.2031/Suwayomi-Server-v2.1.2031.jar" -o bin/mangatan/resources/Suwayomi-Server.jar
 
 .PHONY: release-notes
 release-notes:
