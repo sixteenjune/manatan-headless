@@ -93,7 +93,7 @@ download_natives:
 	rm -rf temp_natives
 	
 	@echo "Downloading JogAmp..."
-	curl -L "https://jogamp.org/deployment/jogamp-current/archive/jogamp-all-platforms.7z" -o jogamp.7z
+	curl -L "https://github.com/KolbyML/jogamp/releases/download/1/jogamp-all-platforms.7z" -o jogamp.7z
 	
 	@echo "Extracting libraries..."
 	# Extract only the specific architecture folder

@@ -143,7 +143,7 @@ jobs:
       - name: Prepare JogAmp Natives
         shell: bash
         run: |
-          curl -L "https://jogamp.org/deployment/jogamp-current/archive/jogamp-all-platforms.7z" -o jogamp.7z
+          curl -L "https://github.com/KolbyML/jogamp/releases/download/1/jogamp-all-platforms.7z" -o jogamp.7z
           
           # Extract the specific target folder
           7z x jogamp.7z "jogamp-all-platforms/lib/${{ matrix.jogamp_target }}"
