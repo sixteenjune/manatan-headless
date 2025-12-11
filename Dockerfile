@@ -1,4 +1,4 @@
-FROM ubuntu:24.04-slim
+FROM ubuntu:24.04
 
 # Install dependencies required by your Rust binary (GTK, etc)
 RUN apt-get update && apt-get install -y --no-install-recommends \
