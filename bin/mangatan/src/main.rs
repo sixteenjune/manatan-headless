@@ -9,6 +9,7 @@ use std::{
         mpsc::{Receiver, Sender},
     },
     thread,
+    time::Duration,
 };
 
 use anyhow::anyhow;
@@ -37,7 +38,7 @@ use reqwest::Client;
 use rust_embed::RustEmbed;
 use tokio::process::Command;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 const APP_VERSION: &str = env!("MANGATAN_VERSION");
@@ -69,6 +70,10 @@ struct Cli {
     /// Runs the server without the GUI (Fixes Docker/Server deployments)
     #[arg(long, env = "MANGATAN_HEADLESS")]
     headless: bool,
+
+    /// Opens the web interface in the default browser after server start (Requires --headless)
+    #[arg(long, requires = "headless")]
+    open_page: bool,
 }
 
 fn main() -> eframe::Result<()> {
@@ -94,6 +99,10 @@ fn main() -> eframe::Result<()> {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
         rt.block_on(async {
+            if args.open_page {
+                tokio::spawn(async { open_webpage_when_ready().await });
+            }
+
             let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
             tokio::spawn(async move {
                 match tokio::signal::ctrl_c().await {
@@ -123,6 +132,7 @@ fn main() -> eframe::Result<()> {
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
         rt.block_on(async {
+            tokio::spawn(async { open_webpage_when_ready().await });
             let _guard = ServerGuard {
                 tx: server_stopped_tx,
             };
@@ -775,4 +785,45 @@ fn perform_update() -> Result<(), Box<dyn std::error::Error>> {
         .update()?;
 
     Ok(())
+}
+
+async fn open_webpage_when_ready() {
+    let client = Client::new();
+    let query_payload = r#"{"query": "query AllCategories { categories { nodes { mangas { nodes { title } } } } }"}"#;
+
+    info!("⏳ Polling GraphQL endpoint for readiness (timeout 10s)...");
+
+    // Define the polling task
+    let polling_task = async {
+        loop {
+            let request = client
+                .post("http://127.0.0.1:4568/api/graphql")
+                .header("Content-Type", "application/json")
+                .body(query_payload);
+
+            match request.send().await {
+                Ok(resp)
+                    if resp.status().is_success() || resp.status() == StatusCode::UNAUTHORIZED =>
+                {
+                    info!("✅ Server is responsive! Opening browser...");
+                    if let Err(e) = open::that("http://localhost:4568") {
+                        error!("❌ Failed to open browser: {}", e);
+                    }
+                    return; // Success: Exit the loop
+                }
+                err => {
+                    warn!("Failed to poll graphql to open webpage: {err:?}");
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
+        }
+    };
+
+    // Wrap polling task in a 10-second timeout
+    if tokio::time::timeout(Duration::from_secs(10), polling_task)
+        .await
+        .is_err()
+    {
+        error!("❌ Timed out waiting for server readiness (10s). Browser open cancelled.");
+    }
 }
