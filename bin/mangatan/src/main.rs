@@ -329,6 +329,12 @@ impl eframe::App for MyApp {
 
                     ui.add_space(5.0);
 
+                    if ui.button("💬 Join Discord").clicked() {
+                        let _ = open::that("https://discord.gg/tDAtpPN8KK");
+                    }                    
+
+                    ui.add_space(5.0);
+
                     if ui.button("Open Data Folder").clicked() {
                         if !self.data_dir.exists() {
                             let _ = std::fs::create_dir_all(&self.data_dir);
