@@ -24,7 +24,7 @@ use axum::{
     routing::any,
 };
 use clap::Parser;
-use directories::ProjectDirs;
+use directories::{BaseDirs, ProjectDirs};
 use eframe::{
     egui::{self},
     icon_data,
@@ -134,7 +134,7 @@ fn main() -> eframe::Result<()> {
     let icon = icon_data::from_png_bytes(ICON_BYTES).expect("The icon data must be valid");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([300.0, 220.0])
+            .with_inner_size([320.0, 320.0])
             .with_icon(icon)
             .with_title("Mangatan")
             .with_resizable(false)
@@ -233,10 +233,10 @@ impl eframe::App for MyApp {
         if self.is_shutting_down {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(50.0);
-                    ui.heading("Stopping Servers...");
-                    ui.add_space(10.0);
+                    ui.add_space(80.0);
                     ui.spinner();
+                    ui.add_space(10.0);
+                    ui.heading("Stopping Servers...");
                     ui.label("Cleaning up child processes...");
                 });
             });
@@ -245,107 +245,154 @@ impl eframe::App for MyApp {
                 std::process::exit(0);
             }
             ctx.request_repaint();
-        } else {
-            egui::Area::new("version_watermark".into())
-                .anchor(egui::Align2::LEFT_BOTTOM, [8.0, -8.0])
-                .order(egui::Order::Foreground)
-                .show(ctx, |ui| {
-                    ui.weak(format!("v{}", env!("CARGO_PKG_VERSION")));
-                });
+            return;
+        }
 
-            // Main Content Panel
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(10.0);
-                    ui.heading("Mangatan Launcher");
-                    ui.add_space(10.0);
+        // --- NORMAL UI ---
 
-                    // Update Status UI
+        // 1. Version Footer (Floating)
+        egui::Area::new("version_watermark".into())
+            .anchor(egui::Align2::LEFT_BOTTOM, [8.0, -8.0])
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.weak(format!("v{}", env!("CARGO_PKG_VERSION")));
+            });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            // --- TOP HEADER: Title & Updates ---
+            ui.horizontal(|ui| {
+                ui.heading("Mangatan");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let status = self.update_status.lock().unwrap().clone();
                     match status {
-                        UpdateStatus::Idle => {
-                            if ui.button("🔄 Check for Updates").clicked() {
+                        UpdateStatus::Idle | UpdateStatus::UpToDate => {
+                            if ui.small_button("🔄 Check Updates").clicked() {
                                 let status_clone = self.update_status.clone();
                                 std::thread::spawn(move || check_for_updates(status_clone));
                             }
                         }
                         UpdateStatus::Checking => {
                             ui.spinner();
-                            ui.label("Checking GitHub...");
                         }
-                        UpdateStatus::UpdateAvailable(ver) => {
-                            ui.label(format!("✨ Update {} available", ver));
+                        _ => {} // Handle active updates in the main body
+                    }
+                });
+            });
+
+            ui.separator();
+            ui.add_space(10.0);
+
+            // --- UPDATE NOTIFICATIONS AREA ---
+            // Only shows up if something important is happening
+            let status = self.update_status.lock().unwrap().clone();
+            match status {
+                UpdateStatus::UpdateAvailable(ver) => {
+                    ui.group(|ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.colored_label(
+                                egui::Color32::LIGHT_BLUE,
+                                format!("✨ Update {} Available", ver),
+                            );
+                            ui.add_space(5.0);
                             if ui.button("⬇ Download & Install").clicked() {
                                 self.trigger_update();
                             }
-                        }
-                        UpdateStatus::UpToDate => {
-                            ui.label("✅ You are up to date");
-                        }
-                        UpdateStatus::Downloading => {
+                        });
+                    });
+                    ui.add_space(10.0);
+                }
+                UpdateStatus::Downloading => {
+                    ui.group(|ui| {
+                        ui.vertical_centered(|ui| {
                             ui.spinner();
                             ui.label("Downloading update...");
-                        }
-                        UpdateStatus::RestartRequired => {
-                            ui.colored_label(egui::Color32::GREEN, "✔ Installed!");
-
+                        });
+                    });
+                    ui.add_space(10.0);
+                }
+                UpdateStatus::RestartRequired => {
+                    ui.group(|ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.colored_label(egui::Color32::GREEN, "✔ Update Ready!");
+                            ui.add_space(5.0);
                             if ui.button("🚀 Restart App").clicked() {
                                 if let Ok(exe_path) = std::env::current_exe() {
                                     let mut exe_str = exe_path.to_string_lossy().to_string();
-                                    if cfg!(target_os = "linux") && exe_str.ends_with(" (deleted)") {
+                                    if cfg!(target_os = "linux") && exe_str.ends_with(" (deleted)")
+                                    {
                                         exe_str = exe_str.replace(" (deleted)", "");
                                     }
-                                    if let Err(err) = std::process::Command::new(&exe_str)
-                                        .spawn()
-                                        .map_err(|err| {
-                                            anyhow!(
-                                                "Failed to restart: {err}, executable path  {exe_str:?}"
-                                            )
-                                        })
-                                    {
-                                        error!("{err:?}");
-                                    }
+                                    let _ = std::process::Command::new(exe_str).spawn();
                                 }
-
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
-                        }
-                        UpdateStatus::Error(e) => {
-                            ui.colored_label(egui::Color32::RED, "Update Error");
-                            ui.small(e.chars().take(40).collect::<String>());
-                            if ui.button("Retry").clicked() {
-                                *self.update_status.lock().unwrap() = UpdateStatus::Idle;
-                            }
-                        }
+                        });
+                    });
+                    ui.add_space(10.0);
+                }
+                UpdateStatus::Error(e) => {
+                    ui.colored_label(egui::Color32::RED, "Update Failed");
+                    ui.small(e.chars().take(40).collect::<String>());
+                    if ui.button("Retry").clicked() {
+                        *self.update_status.lock().unwrap() = UpdateStatus::Idle;
                     }
                     ui.add_space(10.0);
-                    ui.separator();
-                    ui.add_space(10.0);
+                }
+                _ => {}
+            }
 
-                    // App Controls
-                    if ui.button("Open Web UI").clicked() {
-                        let _ = open::that("http://localhost:4568");
-                    }
+            // --- PRIMARY ACTION (THE "HERO" BUTTON) ---
+            ui.vertical_centered(|ui| {
+                ui.add_space(10.0);
+                let btn_size = egui::vec2(ui.available_width() * 0.9, 50.0);
+                let btn =
+                    egui::Button::new(egui::RichText::new("🚀 OPEN WEB UI").size(20.0).strong())
+                        .min_size(btn_size);
 
-                    ui.add_space(5.0);
+                if ui.add(btn).clicked() {
+                    let _ = open::that("http://localhost:4568");
+                }
+            });
 
-                    if ui.button("💬 Join Discord").clicked() {
-                        let _ = open::that("https://discord.gg/tDAtpPN8KK");
-                    }                    
+            ui.add_space(20.0);
 
-                    ui.add_space(5.0);
+            // --- SECONDARY ACTIONS (Community) ---
+            ui.vertical_centered(|ui| {
+                if ui.button("💬 Join Discord Community").clicked() {
+                    let _ = open::that("https://discord.gg/tDAtpPN8KK");
+                }
+            });
 
-                    if ui.button("Open Data Folder").clicked() {
+            ui.add_space(15.0);
+            ui.separator();
+
+            // --- TERTIARY ACTIONS (Data Management) ---
+            ui.add_space(5.0);
+            ui.label("Data Management:");
+
+            // Use a grid to put the folder buttons side-by-side or stacked cleanly
+            ui.columns(2, |columns| {
+                columns[0].vertical_centered_justified(|ui| {
+                    if ui.button("📂 Mangatan Data").clicked() {
                         if !self.data_dir.exists() {
                             let _ = std::fs::create_dir_all(&self.data_dir);
                         }
-                        if let Err(e) = open::that(&self.data_dir) {
-                            tracing::error!("Failed to open data folder: {}", e);
+                        let _ = open::that(&self.data_dir);
+                    }
+                });
+                columns[1].vertical_centered_justified(|ui| {
+                    if ui.button("📂 Suwayomi Data").clicked() {
+                        if let Some(base_dirs) = BaseDirs::new() {
+                            let dir = base_dirs.data_local_dir().join("Tachidesk");
+                            if !dir.exists() {
+                                let _ = std::fs::create_dir_all(&dir);
+                            }
+                            let _ = open::that(&dir);
                         }
                     }
                 });
             });
-        }
+        });
     }
 }
 
