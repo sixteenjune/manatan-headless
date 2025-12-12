@@ -40,6 +40,8 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
+const APP_VERSION: &str = env!("MANGATAN_VERSION");
+
 static ICON_BYTES: &[u8] = include_bytes!("../resources/faviconlogo.png");
 static JAR_BYTES: &[u8] = include_bytes!("../resources/Suwayomi-Server.jar");
 
@@ -260,7 +262,7 @@ impl eframe::App for MyApp {
             .anchor(egui::Align2::LEFT_BOTTOM, [8.0, -8.0])
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                ui.weak(format!("v{}", env!("CARGO_PKG_VERSION")));
+                ui.weak(APP_VERSION);
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -726,7 +728,7 @@ fn check_for_updates(status: Arc<Mutex<UpdateStatus>>) {
         .repo_name("Mangatan")
         .bin_name("mangatan") // This must match the binary name inside the zip/tar
         .target(target_str) // CRITICAL: Forces it to look for "Windows-x64" etc.
-        .current_version(env!("CARGO_PKG_VERSION"))
+        .current_version(APP_VERSION)
         .build();
 
     match updater_result {
@@ -734,11 +736,9 @@ fn check_for_updates(status: Arc<Mutex<UpdateStatus>>) {
             match updater.get_latest_release() {
                 Ok(release) => {
                     // Check if remote version > local version
-                    let is_newer = self_update::version::bump_is_greater(
-                        env!("CARGO_PKG_VERSION"),
-                        &release.version,
-                    )
-                    .unwrap_or(false);
+                    let is_newer =
+                        self_update::version::bump_is_greater(APP_VERSION, &release.version)
+                            .unwrap_or(false);
 
                     if is_newer {
                         *status.lock().expect("lock shouldn't panic") =
@@ -768,7 +768,7 @@ fn perform_update() -> Result<(), Box<dyn std::error::Error>> {
         .bin_name("mangatan")
         .target(target_str)
         .show_download_progress(true)
-        .current_version(env!("CARGO_PKG_VERSION"))
+        .current_version(APP_VERSION)
         .no_confirm(true)
         .build()?
         .update()?;
