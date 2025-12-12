@@ -119,9 +119,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --- WINDOWS NASM SETUP (New) ---
-      - name: Install NASM (Windows)
-        if: runner.os == 'Windows'
+      # --- NASM SETUP ---
+      - name: Install NASM
+        if: runner.os == 'Windows' || runner.os == 'macOS'
         uses: ilammy/setup-nasm@v1
 
       # --- LINUX DEPENDENCIES ---
@@ -133,7 +133,7 @@ jobs:
 
       - name: Install macOS Dependencies
         if: runner.os == 'macOS'
-        run: brew install p7zip nasm
+        run: brew install p7zip
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
