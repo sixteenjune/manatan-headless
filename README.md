@@ -97,3 +97,7 @@ The following links, repos, companies and projects have been important in the de
 - https://github.com/exn251/Mangatan/
 - https://github.com/Suwayomi/Suwayomi-Server
 - https://github.com/Suwayomi/Suwayomi-WebUI
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=KolbyML/Mangatan&type=date&legend=top-left)](https://www.star-history.com/#KolbyML/Mangatan&type=date&legend=top-left)
