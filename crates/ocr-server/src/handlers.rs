@@ -6,6 +6,7 @@ use axum::{
     http::StatusCode,
 };
 use serde::Deserialize;
+use tracing::{info, warn};
 
 use crate::{
     jobs, logic,
@@ -43,32 +44,56 @@ pub async fn ocr_handler(
     Query(params): Query<OcrRequest>,
 ) -> Result<Json<Vec<crate::logic::OcrResult>>, (StatusCode, String)> {
     let cache_key = logic::get_cache_key(&params.url);
+    info!("OCR Handler: Incoming request for cache_key={}", cache_key);
 
+    info!("OCR Handler: Attempting to acquire cache read lock for check...");
     if let Some(entry) = state.cache.read().expect("lock").get(&cache_key) {
+        info!("OCR Handler: Cache HIT for cache_key={}", cache_key);
         state.requests_processed.fetch_add(1, Ordering::Relaxed);
         return Ok(Json(entry.data.clone()));
     }
+    info!(
+        "OCR Handler: Cache MISS for cache_key={}. Starting processing.",
+        cache_key
+    );
 
-    // 2. Process
-    match logic::fetch_and_process(&params.url, params.user, params.pass).await {
+    let result = logic::fetch_and_process(&params.url, params.user, params.pass).await;
+
+    match result {
         Ok(data) => {
             state.requests_processed.fetch_add(1, Ordering::Relaxed);
+            info!(
+                "OCR Handler: Processing successful for cache_key={}",
+                cache_key
+            );
 
+            info!("OCR Handler: Attempting to acquire cache write lock for insertion...");
             {
                 let mut w = state.cache.write().expect("lock");
+                info!("OCR Handler: Cache write lock acquired.");
                 w.insert(
-                    cache_key,
+                    cache_key.clone(),
                     CacheEntry {
                         context: params.context,
                         data: data.clone(),
                     },
                 );
+                info!("OCR Handler: Cache data inserted. Releasing write lock.");
             }
 
+            info!("OCR Handler: Triggering cache save to disk...");
             state.save_cache();
+            info!("OCR Handler: Cache save complete.");
+
             Ok(Json(data))
         }
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => {
+            warn!(
+                "OCR Handler: Processing FAILED for cache_key={}: {}",
+                cache_key, e
+            );
+            Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        }
     }
 }
 
