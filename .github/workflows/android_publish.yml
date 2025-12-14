@@ -25,6 +25,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Android Platform & NDK
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-30" "build-tools;30.0.3" "ndk;26.1.10909125"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -48,22 +53,16 @@ jobs:
 
       - name: Setup App Icon
         run: |
-          # Create standard Android resource directories
           mkdir -p bin/mangatan_android/res/mipmap-xxxhdpi
           mkdir -p bin/mangatan_android/res/mipmap-xxhdpi
           mkdir -p bin/mangatan_android/res/mipmap-xhdpi
           mkdir -p bin/mangatan_android/res/mipmap-hdpi
           mkdir -p bin/mangatan_android/res/mipmap-mdpi
-          
-          # Copy the requested favicon to all mipmap folders as ic_launcher.png
-          # This ensures the icon appears correctly on all device densities
           cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-xxxhdpi/ic_launcher.png
           cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-xxhdpi/ic_launcher.png
           cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-xhdpi/ic_launcher.png
           cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-hdpi/ic_launcher.png
           cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-mdpi/ic_launcher.png
-          
-          echo "✅ Icon setup complete."
 
       - name: Build APK
         working-directory: bin/mangatan_android
