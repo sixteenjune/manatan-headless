@@ -64,29 +64,40 @@ jobs:
           cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-hdpi/ic_launcher.png
           cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-mdpi/ic_launcher.png
 
+      - name: Configure Dummy Keystore
+        working-directory: bin/mangatan_android
+        run: |
+          # 1. Generate a temporary dummy keystore
+          keytool -genkey -v -keystore dummy.keystore -alias dummy -keyalg RSA -keysize 2048 -validity 10000 -storepass password -keypass password -dname "CN=Dummy,O=Dummy,C=US"
+          
+          # 2. Inject this config into Cargo.toml temporarily
+          cat >> Cargo.toml <<EOF
+          
+          [package.metadata.android.signing.release]
+          path = "dummy.keystore"
+          password = "password"
+          EOF
+
       - name: Build APK
         working-directory: bin/mangatan_android
         run: |
-          # 1. Locate the NDK (Try environment variable, fallback to known path from your logs)
+          # 1. Locate the NDK
           NDK_ROOT=${ANDROID_NDK_HOME}
           if [ -z "$NDK_ROOT" ]; then
-            # Fallback based on your error logs
             NDK_ROOT=$(ls -d /usr/local/lib/android/sdk/ndk/* | sort -V | tail -n1)
           fi
           echo "Using NDK at: $NDK_ROOT"
 
-          # 2. Define the path to LLVM binaries
+          # 2. Define path to LLVM binaries
           TOOLCHAIN_BIN="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
-          # 3. Export specific variables to force OpenSSL to use LLVM tools
+          # 3. Export specific variables for OpenSSL build
           export RANLIB="$TOOLCHAIN_BIN/llvm-ranlib"
           export AR="$TOOLCHAIN_BIN/llvm-ar"
           export CC="$TOOLCHAIN_BIN/aarch64-linux-android30-clang"
           export CXX="$TOOLCHAIN_BIN/aarch64-linux-android30-clang++"
           
-          echo "RANLIB set to: $RANLIB"
-
-          # 4. Run the build
+          # 4. Build (Now uses the dummy keystore)
           cargo apk build --release
 
       - name: Sign APK
