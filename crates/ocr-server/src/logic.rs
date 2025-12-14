@@ -1,11 +1,10 @@
 use std::io::Cursor;
 
 use anyhow::anyhow;
-use chrome_lens_ocr::{LensClient, LensResult};
+use chrome_lens_ocr::LensClient;
 use image::{DynamicImage, GenericImageView, ImageBuffer, ImageFormat, ImageReader};
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::merge::{self, MergeConfig};
 
