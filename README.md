@@ -1,42 +1,69 @@
 # Mangatan
-A 1 binary solution for https://github.com/kaihouguide/Mangatan
+
+**The easiest way to read manga with instant OCR lookup.** *No scripts, no complex setup—just download and read.*
+
+---
+
+### 🖥️ Supported Platforms
+| Windows | Linux | macOS | Android | iOS |
+| :---: | :---: | :---: | :---: | :---: |
+| ✅ | ✅ | ✅ | ✅ | 🚧 (Coming Soon) |
+
+---
 
 Discord Server: https://discord.gg/tDAtpPN8KK
 
-No monkey script or ocr setup required! Run the executable and start reading manga in your browser. For more instructions on how to use Suwayomi, please refer to their respective repo https://github.com/Suwayomi/Suwayomi-Server.
+## ✨ Why Mangatan?
+
+Traditional setups for reading manga with Japanese lookup (OCR) can be complicated, often requiring users to install Python scripts, browser extensions (like userscripts), and configure local servers manually.
+
+**Mangatan simplifies everything into a single app:**
+* **Zero Configuration:** No need to install "Monkey scripts," configure Optical Character Recognition (OCR) tools, or mess with command lines.
+* **Built-in OCR:** Just hover over Japanese text to get instant translations and dictionary lookups.
+* **Cross-Platform:** Run the exact same interface on your PC, Mac, or Android phone.
+* **Browser Interface:** Uses the familiar [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) interface in your favorite web browser.
 
 ## 🚀 Getting Started
 
-Download the latest release from the [Releases](https://github.com/KolbyML/Mangatan/releases) page.
+Download the latest release for your platform from the [Releases](https://github.com/KolbyML/Mangatan/releases) page.
 
-Run the executable, then visit http://127.0.0.1:4568/ in your web browser to access the Mangatan web interface.
+Run the executable, then visit `http://127.0.0.1:4568/` in your web browser to access the Mangatan web interface.
 
 https://github.com/user-attachments/assets/38c63c86-289d-45a4-ba85-e29f1b812ceb
 
 ## Setup (Windows)
 
-1. Download the .zip file for `windows-x86` from the [releases](https://github.com/KolbyML/Mangatan/releases) page.
-2. Extract the .zip, and inside it launch `mangatan.exe`. Wait a few moments. Allow Windows Defender SmartScreen if prompted (More info > Run anyway).(if it doesn't run on double click , go to properties and ✓ unblock)
-3. A "Mangatan Launcher" window should pop up, here click "**Open Web UI**".
-4. Allow Windows Firewall connections if prompted, and the Suwayomi web interface (`127.0.0.1:4568/`) should open in a new browser tab. Please wait a few moments while the initial setup is taking place. After ~30 seconds, reload the page to access the Suwayomi library (`127.0.0.1:4568/library`).
-5. To get manga, you need to locate the correct `index.min.json` extension repository URL for Suwayomi on Google. Add this URL in **Settings** > **Browse** > **Extension repositories** > **Add Repository** > `[paste the URL]` and click **OK**
-6. Go in **"Browse"** on the left sidebar, then go on the **"Extensions"** tab and click **"Install"** on your desired source.
-7. Finally, to start reading go to the **"Sources"** tab, click on the installed source and find the manga you wish to read. Automatic OCR will be functional and you can use Yomitan just fine!
+1.  Download the `.zip` file for `windows-x86` from the [releases](https://github.com/KolbyML/Mangatan/releases) page.
+2.  Extract the `.zip`, and inside it launch `mangatan.exe`.
+    * *Note: If prompted by Windows Defender SmartScreen, click **More info** > **Run anyway**. If it doesn't run on double-click, right-click the file > **Properties** > **Unblock**.*
+3.  A "Mangatan Launcher" window will appear. Click "**Open Web UI**".
+4.  Allow Windows Firewall connections if prompted. The Suwayomi web interface (`127.0.0.1:4568/`) should open in a new browser tab.
+    * *Please wait ~30 seconds for the initial setup to finish. Reload the page to access the library.*
+5.  **Adding Sources:**
+    * Go to **Settings** > **Browse** > **Extension repositories** > **Add Repository**.
+    * Paste a valid Suwayomi `index.min.json` extension repository URL (search "Suwayomi extension repos" on Google to find one) and click **OK**.
+6.  **Installing Extensions:**
+    * Go to **"Browse"** on the left sidebar, then the **"Extensions"** tab.
+    * Click **"Install"** on your desired source.
+7.  **Start Reading:**
+    * Go to the **"Sources"** tab, click your installed source, and find a manga.
+    * **OCR is automatically active!** You can use tools like Yomitan immediately.
 
 ## Troubleshooting
 
-To fully clear cache and data from previous installs, delete the following and try again:
+To fully clear cache and data from previous installs, delete the following folders and try again:
 
-- `mangatan-windows-x86`
-- `%LOCALAPPDATA%\Tachidesk`
-- `%APPDATA%\mangatan`
-- `%Temp%\Suwayomi*`
-- `%Temp%\Tachidesk*`
-- Site data & cookies from `127.0.0.1`
+* `mangatan-windows-x86` (Your extraction folder)
+* `%LOCALAPPDATA%\Tachidesk`
+* `%APPDATA%\mangatan`
+* `%Temp%\Suwayomi*`
+* `%Temp%\Tachidesk*`
+* **Browser Data:** Clear Site data & cookies for `127.0.0.1`
+
 ## Roadmap
 
 - [x] Package Mangatan, OCR Server, and Suwayomi into a single binary
-- [ ] Add Android Support https://github.com/KolbyML/Mangatan/issues/17
+- [x] Add Android Support https://github.com/KolbyML/Mangatan/issues/17
 - [ ] Add iOS Support https://github.com/KolbyML/Mangatan/issues/19
 - [ ] Add Manga Immersion Stats page https://github.com/KolbyML/Mangatan/issues/1
 - [ ] Suggest more features https://github.com/KolbyML/Mangatan/issues/new
@@ -46,7 +73,6 @@ To fully clear cache and data from previous installs, delete the following and t
 ### Prerequisites
 
 #### Windows
-
 ```ps
 winget install Microsoft.OpenJDK.21 DenoLand.Deno Rustlang.Rustup
 ```
@@ -72,6 +98,32 @@ Install Android Studio to get Android SDK https://developer.android.com/studio
 Mark sure you install
 - Android 11 SDK
 - NDK
+
+
+#### Log App
+
+```bash
+adb logcat RustJRE RustStdoutStderr '*:S'
+```
+
+#### Run App in debug mode (will reset your Mangatan data)
+
+```bash
+make dev-android
+```
+
+#### See local files
+
+```
+adb shell run-as com.mangatan.app ls -la files
+```
+
+#### Forward Ports so accessible on desktop
+```
+adb forward tcp:4567 tcp:4567
+```
+
+adb forward --remove-all
 
 ### Setup Environment
 

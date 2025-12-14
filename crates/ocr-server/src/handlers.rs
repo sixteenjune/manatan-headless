@@ -172,9 +172,9 @@ pub async fn is_chapter_preprocessed_handler(
             serde_json::json!({ "status": "processed", "cached_count": cached_count, "total_expected": total }),
         );
     }
-    return Json(
+    Json(
         serde_json::json!({ "status": "idle", "cached_count": cached_count, "total_expected": total }),
-    );
+    )
 }
 
 pub async fn preprocess_handler(

@@ -924,7 +924,7 @@ async fn open_webpage_when_ready() {
                     if let Err(e) = open::that("http://localhost:4568") {
                         error!("❌ Failed to open browser: {}", e);
                     }
-                    return; // Success: Exit the loop
+                    return;
                 }
                 err => {
                     warn!("Failed to poll graphql to open webpage: {err:?}");
@@ -934,7 +934,6 @@ async fn open_webpage_when_ready() {
         }
     };
 
-    // Wrap polling task in a 10-second timeout
     if tokio::time::timeout(Duration::from_secs(10), polling_task)
         .await
         .is_err()

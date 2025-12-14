@@ -5,9 +5,9 @@ use std::{
     path::PathBuf,
     sync::{Arc, RwLock, atomic::AtomicUsize},
 };
-use tracing::warn;
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::logic::OcrResult;
 

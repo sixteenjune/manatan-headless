@@ -44,7 +44,7 @@ pub async fn run_chapter_job(
             let completed_counter = completed_counter.clone();
             let save_lock = save_lock.clone();
 
-            let page_id = url.split('/').last().unwrap_or("unknown").to_string();
+            let page_id = url.split('/').next_back().unwrap_or("unknown").to_string();
 
             async move {
                 let cache_key = crate::logic::get_cache_key(&url);
@@ -83,10 +83,10 @@ pub async fn run_chapter_job(
                     }
                 }
 
-                if current % 5 == 0 {
-                    if let Ok(_guard) = save_lock.try_lock() {
-                        state.save_cache();
-                    }
+                if current.is_multiple_of(5)
+                    && let Ok(_guard) = save_lock.try_lock()
+                {
+                    state.save_cache();
                 }
             }
         })

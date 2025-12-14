@@ -11,49 +11,45 @@ version.workspace = true
 autobins = false 
 
 [package.metadata.android]
-package = "com.mangatan.app" 
+package = "com.mangatan.app"
 label = "Mangatan"
 min_sdk_version = 23
-target_sdk_version = 35
+target_sdk_version = 28 
 build_targets = ["aarch64-linux-android"]
+assets = "assets"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[package.metadata.android.application]
+allow_native_heap_pointer_tagging = false
+request_legacy_external_storage = true
 
 [lib]
-name = "mangatan_android"
-crate-type = ["cdylib", "lib"]
-path = "src/lib.rs"
-
-[features]
-default = []
-embed-jre = []
+crate-type = ["cdylib"]
 
 [target.'cfg(target_os = "android")'.dependencies]
-android_logger = "0.15"
-anyhow.workspace = true
+android-activity = { version = "0.6", features = ["native-activity"] }
 axum.workspace = true
-directories.workspace = true
-eframe = { version = "0.33.2", default-features = false, features = ["glow", "default_fonts", "android-native-activity"] }
-egui_demo_lib = { version = "0.33.2", default-features = false, features = ["chrono"] }
-egui_extras = { version = "0.33.2", default-features = false, features = ["default", "image"] }
+eframe = { version = "0.33", default-features = false, features = ["wgpu", "android-native-activity" ] }
+egui = "0.33"
 futures.workspace = true
-futures-util.workspace = true
-image.workspace = true
-jni = "0.21"
-libloading = "0.9"
-log = { version = "0.4.28", features = ["std"] }
-
-# Internal Crates
-mangatan-core.workspace = true
+jni.workspace = true
+lazy_static.workspace = true
+libc.workspace = true
+libloading.workspace = true
+mangatan-ocr-server.workspace = true
 mime_guess.workspace = true
-open.workspace = true
+openssl.workspace = true
 reqwest.workspace = true
-rust-embed.workspace = true
-tao.workspace = true    
+tar.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
+tracing-log.workspace = true
 tracing-subscriber.workspace = true
-winit = { version = "0.30", default-features = false }
-zip.workspace = true
-
-[lints]
-workspace = true
+winit = "0.30"

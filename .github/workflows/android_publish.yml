@@ -1,0 +1,108 @@
+name: Android Publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-apk
+        run: cargo install cargo-apk
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: 'yarn'
+          cache-dependency-path: 'Suwayomi-WebUI/yarn.lock'
+
+      - name: Prepare Assets (WebUI & Jars)
+        run: |
+          make android_webui
+          make download_android_jar
+          make download_android_jre
+
+      - name: Setup App Icon
+        run: |
+          # Create standard Android resource directories
+          mkdir -p bin/mangatan_android/res/mipmap-xxxhdpi
+          mkdir -p bin/mangatan_android/res/mipmap-xxhdpi
+          mkdir -p bin/mangatan_android/res/mipmap-xhdpi
+          mkdir -p bin/mangatan_android/res/mipmap-hdpi
+          mkdir -p bin/mangatan_android/res/mipmap-mdpi
+          
+          # Copy the requested favicon to all mipmap folders as ic_launcher.png
+          # This ensures the icon appears correctly on all device densities
+          cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-xxxhdpi/ic_launcher.png
+          cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-xxhdpi/ic_launcher.png
+          cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-xhdpi/ic_launcher.png
+          cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-hdpi/ic_launcher.png
+          cp bin/mangatan/resources/faviconlogo.png bin/mangatan_android/res/mipmap-mdpi/ic_launcher.png
+          
+          echo "✅ Icon setup complete."
+
+      - name: Build APK
+        working-directory: bin/mangatan_android
+        run: cargo apk build --release
+
+      - name: Sign APK
+        id: sign_app
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: bin/mangatan_android/target/release/apk
+          signingKeyBase64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Rename Artifact
+        run: |
+          mv ${{ steps.sign_app.outputs.signedReleaseFile }} mangatan-android-signed.apk
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mangatan-android
+          path: mangatan-android-signed.apk
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mangatan-android
+          path: .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: true
+          files: mangatan-android-signed.apk

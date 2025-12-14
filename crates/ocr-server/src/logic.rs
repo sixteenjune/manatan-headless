@@ -112,9 +112,7 @@ async fn execute_graphql_request(
             .await
             .unwrap_or_else(|_| "[Failed to read body]".to_string());
         return Err(anyhow!(
-            "GraphQL request failed (Status: {}). Body: {}",
-            status,
-            body
+            "GraphQL request failed (Status: {status}). Body: {body}"
         ));
     }
 
@@ -134,18 +132,13 @@ pub async fn resolve_total_pages_from_graphql(
         .iter()
         .find(|&p| *p == "manga")
         .and_then(|_| parts.get(parts.iter().position(|&p| p == "manga")? + 1))
-        .ok_or_else(|| anyhow!("Failed to parse manga ID from URL: {}", chapter_base_url))?;
+        .ok_or_else(|| anyhow!("Failed to parse manga ID from URL: {chapter_base_url}"))?;
 
     let chapter_number_str = parts
         .iter()
         .find(|&p| *p == "chapter")
         .and_then(|_| parts.get(parts.iter().position(|&p| p == "chapter")? + 1))
-        .ok_or_else(|| {
-            anyhow!(
-                "Failed to parse chapter number from URL: {}",
-                chapter_base_url
-            )
-        })?;
+        .ok_or_else(|| anyhow!("Failed to parse chapter number from URL: {chapter_base_url}"))?;
 
     let manga_id = manga_id_str.parse::<i32>()?;
     let chapter_number = chapter_number_str.parse::<f64>()?;
@@ -161,7 +154,7 @@ pub async fn resolve_total_pages_from_graphql(
     let json: ChapterPageCountResponse = resp
         .json()
         .await
-        .map_err(|e| anyhow!("Error decoding STEP 1 GraphQL response: {}", e))?;
+        .map_err(|err| anyhow!("Error decoding STEP 1 GraphQL response: {err}"))?;
 
     let chapters: Vec<ChapterNode> = json
         .data
@@ -182,10 +175,7 @@ pub async fn resolve_total_pages_from_graphql(
         .find(|ch| (ch.chapter_number - target_chapter_num).abs() < 0.001);
 
     let internal_chapter_id = matching_chapter.map(|ch| ch.id).ok_or_else(|| {
-        anyhow!(
-            "Failed to find internal ID for chapter number {}",
-            target_chapter_num
-        )
+        anyhow!("Failed to find internal ID for chapter number {target_chapter_num}")
     })?;
 
     let mutation_body = serde_json::json!({
@@ -201,7 +191,7 @@ pub async fn resolve_total_pages_from_graphql(
     let json: FetchPagesResponse = resp
         .json()
         .await
-        .map_err(|e| anyhow!("Error decoding STEP 2 GraphQL response: {}", e))?;
+        .map_err(|err| anyhow!("Error decoding STEP 2 GraphQL response: {err}"))?;
 
     let page_count = json
         .data
@@ -327,7 +317,7 @@ pub async fn fetch_and_process(
         .send()
         .await?
         .error_for_status()
-        .map_err(|err| anyhow!("Failed error_for_status (URL: {}): {err:?}", target_url))?;
+        .map_err(|err| anyhow!("Failed error_for_status (URL: {target_url}): {err:?}"))?;
     let bytes = resp.bytes().await?.to_vec();
 
     // 2. Decode Image (With AVIF Fix)
