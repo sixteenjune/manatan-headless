@@ -1,0 +1,6 @@
+format_version = 1
+
+[project]
+version_num = "1"
+version_string = "1.0.0"
+bundle_id = "com.mangatan.app"
