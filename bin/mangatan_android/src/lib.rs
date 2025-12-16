@@ -210,6 +210,7 @@ fn android_main(app: AndroidApp) {
 
     info!("Starting Mangatan...");
 
+    ensure_battery_unrestricted(&app);
     check_and_request_permissions(&app);
 
     let app_bg = app.clone();
@@ -870,6 +871,103 @@ fn find_file_in_dir(dir: &Path, filename: &str) -> Option<PathBuf> {
 struct AppState {
     client: Client,
     webui_dir: PathBuf,
+}
+
+fn ensure_battery_unrestricted(app: &AndroidApp) {
+    use jni::objects::JObject;
+    use jni::objects::JValue;
+
+    let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
+    let vm = unsafe { JavaVM::from_raw(vm_ptr).unwrap() };
+    let mut env = vm.attach_current_thread().unwrap();
+
+    let activity_ptr = app.activity_as_ptr() as jni::sys::jobject;
+    let context = unsafe { JObject::from_raw(activity_ptr) };
+
+    let pkg_name_jstr = env
+        .call_method(&context, "getPackageName", "()Ljava/lang/String;", &[])
+        .unwrap()
+        .l()
+        .unwrap();
+    let pkg_name_string: String = env.get_string((&pkg_name_jstr).into()).unwrap().into();
+
+    let power_service_str = env.new_string("power").unwrap();
+    let power_manager = env
+        .call_method(
+            &context,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::Object(&power_service_str)],
+        )
+        .unwrap()
+        .l()
+        .unwrap();
+
+    let is_ignoring = env
+        .call_method(
+            &power_manager,
+            "isIgnoringBatteryOptimizations",
+            "(Ljava/lang/String;)Z",
+            &[JValue::Object(&pkg_name_jstr)],
+        )
+        .unwrap()
+        .z()
+        .unwrap();
+
+    if is_ignoring {
+        info!("Battery optimization is already unrestricted.");
+        return;
+    }
+
+    info!("Requesting removal of battery optimizations...");
+
+    let action_str = env
+        .new_string("android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS")
+        .unwrap();
+
+    let intent_class = env.find_class("android/content/Intent").unwrap();
+    let intent = env
+        .new_object(
+            &intent_class,
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&action_str)],
+        )
+        .unwrap();
+
+    let uri_class = env.find_class("android/net/Uri").unwrap();
+    let uri_str = env
+        .new_string(format!("package:{}", pkg_name_string))
+        .unwrap();
+    let uri = env
+        .call_static_method(
+            &uri_class,
+            "parse",
+            "(Ljava/lang/String;)Landroid/net/Uri;",
+            &[JValue::Object(&uri_str)],
+        )
+        .unwrap()
+        .l()
+        .unwrap();
+
+    let _ = env
+        .call_method(
+            &intent,
+            "setData",
+            "(Landroid/net/Uri;)Landroid/content/Intent;",
+            &[JValue::Object(&uri)],
+        )
+        .unwrap();
+
+    let _ = env
+        .call_method(
+            &context,
+            "startActivity",
+            "(Landroid/content/Intent;)V",
+            &[JValue::Object(&intent)],
+        )
+        .unwrap();
+
+    info!("Battery exemption dialog requested.");
 }
 
 fn get_package_name(env: &mut jni::JNIEnv, context: &JObject) -> jni::errors::Result<String> {

@@ -25,6 +25,9 @@ name = "android.permission.INTERNET"
 name = "android.permission.ACCESS_NETWORK_STATE"
 
 [[package.metadata.android.uses_permission]]
+name = "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+
+[[package.metadata.android.uses_permission]]
 name = "android.permission.READ_EXTERNAL_STORAGE"
 
 [[package.metadata.android.uses_permission]]
