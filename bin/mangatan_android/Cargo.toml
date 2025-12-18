@@ -12,13 +12,13 @@ autobins = false
 
 [package.metadata.android]
 package = "com.mangatan.app"
-label = "Mangatan"
-min_sdk_version = 23
-target_sdk_version = 34 # Upgraded to support newer foreground service rules
 build_targets = ["Arm64V8a"]
 assets = "assets"
-java_sources = "java" # Tell cargo-apk2 where the .java files are
+java_sources = "java"
 
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 26
 
 [[package.metadata.android.uses_permission]]
 name = "android.permission.INTERNET"
@@ -54,32 +54,31 @@ name = "android.permission.FOREGROUND_SERVICE"
 name = "android.permission.POST_NOTIFICATIONS"
 
 [package.metadata.android.application]
-debuggable = true
-label = "Mangatan"
 allow_native_heap_pointer_tagging = false
 request_legacy_external_storage = true
+has_code = true
 
-# REQUIRED for cargo-apk2: Define the main activity
 [[package.metadata.android.application.activity]]
 name = "android.app.NativeActivity"
 label = "Mangatan"
 config_changes = "orientation|keyboardHidden|screenSize"
 exported = true
+
 [[package.metadata.android.application.activity.intent_filter]]
-actions = ["android.intent.action.MAIN"]
+actions = ["android.intent.action.VIEW", "android.intent.action.MAIN"]
 categories = ["android.intent.category.LAUNCHER"]
+
 [[package.metadata.android.application.activity.meta_data]]
 name = "android.app.lib_name"
-value = "mangatan_android" # Must match your [package] name or [lib] name
+value = "mangatan_android" 
 
-# NEW: Define the background service
 [[package.metadata.android.application.service]]
-name = ".MainService"
+name = ".MangatanService"
 enabled = true
 exported = false
-foreground_service_type = "specialUse" # For servers/background processing
 
 [lib]
+name = "mangatan_android"
 crate-type = ["cdylib"]
 
 [target.'cfg(target_os = "android")'.dependencies]

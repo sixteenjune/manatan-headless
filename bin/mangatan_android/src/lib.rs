@@ -82,62 +82,67 @@ impl<'a> MakeWriter<'a> for GuiMakeWriter {
     }
 }
 
-fn start_java_service(app: &AndroidApp) {
+fn start_foreground_service(app: &AndroidApp) {
+    use jni::objects::{JObject, JValue};
+
+    info!("Attempting to start Foreground Service...");
+
     let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
     let vm = unsafe { JavaVM::from_raw(vm_ptr).unwrap() };
     let mut env = vm.attach_current_thread().unwrap();
-    
-    let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jobject) };
 
-    // --- THE FIX: Get the App's ClassLoader ---
-    // We cannot use env.find_class() for custom classes on a background thread.
-    // We must ask the Activity for its ClassLoader.
-    let class_loader = env.call_method(
-        &activity, 
-        "getClassLoader", 
-        "()Ljava/lang/ClassLoader;", 
-        &[]
-    ).unwrap().l().unwrap();
+    let activity_ptr = app.activity_as_ptr() as jni::sys::jobject;
+    let context = unsafe { JObject::from_raw(activity_ptr) };
 
-    // loadClass uses DOT notation: "com.mangatan.app.MainService"
-    let service_class_name = env.new_string("com.mangatan.app.MainService").unwrap();
-    
-    info!("Loading MainService class via ClassLoader...");
-    let cls_main_service = env.call_method(
-        &class_loader,
-        "loadClass",
-        "(Ljava/lang/String;)Ljava/lang/Class;",
-        &[JValue::Object(&service_class_name)],
-    ).unwrap().l().unwrap();
+    let intent_class = env
+        .find_class("android/content/Intent")
+        .expect("Failed to find Intent class");
+    let intent = env
+        .new_object(&intent_class, "()V", &[])
+        .expect("Failed to create Intent");
 
-    // Intent is a SYSTEM class, so find_class("android/content/Intent") works fine
-    let cls_intent = env.find_class("android/content/Intent").unwrap();
-    
-    // Create Intent: new Intent(activity, MainService.class)
-    let intent = env.new_object(
-        &cls_intent,
-        "(Landroid/content/Context;Ljava/lang/Class;)V",
-        &[JValue::Object(&activity), JValue::Object(&cls_main_service)],
-    ).unwrap();
+    let context_class = env
+        .find_class("android/content/Context")
+        .expect("Failed to find Context class");
+    let service_class_name = env
+        .new_string("com.mangatan.app.MangatanService")
+        .expect("Failed to create string");
 
-    // Determine starting method based on SDK
+    let pkg_name = get_package_name(&mut env, &context).unwrap_or("com.mangatan.app".to_string());
+    let pkg_name_jstr = env.new_string(&pkg_name).unwrap();
+
+    let _ = env
+        .call_method(
+            &intent,
+            "setClassName",
+            "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;",
+            &[
+                JValue::Object(&pkg_name_jstr),
+                JValue::Object(&service_class_name),
+            ],
+        )
+        .expect("Failed to set class name on Intent");
+
     let sdk_int = get_android_sdk_version(app);
-    let method_name = if sdk_int >= 26 { "startForegroundService" } else { "startService" };
-
-    info!("Executing activity.{}...", method_name);
-    match env.call_method(
-        &activity,
-        method_name,
-        "(Landroid/content/Intent;)Landroid/content/ComponentName;",
-        &[JValue::Object(&intent)],
-    ) {
-        Ok(_) => info!("✅ Foreground Service start signal sent."),
-        Err(e) => {
-            error!("❌ Failed to start service: {:?}", e);
-            let _ = env.exception_describe();
-            let _ = env.exception_clear();
-        }
+    if sdk_int >= 26 {
+        info!("Calling startForegroundService (SDK >= 26)");
+        let _ = env.call_method(
+            &context,
+            "startForegroundService",
+            "(Landroid/content/Intent;)Landroid/content/ComponentName;",
+            &[JValue::Object(&intent)],
+        );
+    } else {
+        info!("Calling startService (SDK < 26)");
+        let _ = env.call_method(
+            &context,
+            "startService",
+            "(Landroid/content/Intent;)Landroid/content/ComponentName;",
+            &[JValue::Object(&intent)],
+        );
     }
+
+    info!("Foreground Service start request sent.");
 }
 
 fn init_tracing() {
@@ -197,6 +202,10 @@ impl MangatanApp {
 
 impl eframe::App for MangatanApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.server_ready.load(Ordering::Relaxed) {
+            ctx.request_repaint();
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(20.0);
@@ -268,12 +277,11 @@ fn android_main(app: AndroidApp) {
 
     info!("Starting Mangatan...");
 
-
-    start_java_service(&app);
     ensure_battery_unrestricted(&app);
     check_and_request_permissions(&app);
     acquire_wifi_lock(&app);
     acquire_wake_lock(&app);
+    start_foreground_service(&app);
 
     let app_bg = app.clone();
     let files_dir = app.internal_data_path().expect("Failed to get data path");
@@ -618,19 +626,17 @@ fn start_background_services(app: AndroidApp, files_dir: PathBuf) {
     if let Err(e) = install_webui(&app, &webui_dir) {
         error!("Failed to extract WebUI: {:?}", e);
     }
-    let jar_path = files_dir.join("Suwayomi-Server.jar");
+
+    // CHANGE: Create 'bin' directory to satisfy Suwayomi's directory scanner
+    let bin_dir = files_dir.join("bin");
+    if bin_dir.exists() {
+        fs::remove_dir_all(&bin_dir).ok();
+    }
+    fs::create_dir_all(&bin_dir).expect("Failed to create bin directory");
+    let jar_path = bin_dir.join("Suwayomi-Server.jar");
+
     let tachidesk_data = files_dir.join("tachidesk_data");
     let tmp_dir = files_dir.join("tmp");
-
-    if jre_root.exists() {
-        trace!("Removing old JRE...");
-        let _ = fs::remove_dir_all(&jre_root);
-    }
-
-    if let Err(e) = install_jre(&app, &files_dir) {
-        error!("Failed to extract JRE: {:?}", e);
-        return;
-    }
 
     if !tachidesk_data.exists() {
         let _ = fs::create_dir_all(&tachidesk_data);
@@ -688,7 +694,17 @@ fn start_background_services(app: AndroidApp, files_dir: PathBuf) {
 
         // Preload libs
         let lib_base_dir = lib_jli_path.parent().unwrap();
-        let libs_to_preload = ["libverify.so", "libjava.so", "libnet.so", "libnio.so"];
+
+        let libs_to_preload = [
+            "libverify.so",
+            "libjava.so",
+            "libnet.so",
+            "libnio.so",
+            "libawt.so",
+            "libawt_headless.so",
+            "libjawt.so",
+        ];
+
         for name in libs_to_preload {
             let p = lib_base_dir.join(name);
             if p.exists() {
@@ -699,6 +715,8 @@ fn start_background_services(app: AndroidApp, files_dir: PathBuf) {
                 ) {
                     trace!("Loaded {}", name);
                 }
+            } else {
+                trace!("Library not found, skipping preload: {}", name);
             }
         }
 
@@ -708,10 +726,13 @@ fn start_background_services(app: AndroidApp, files_dir: PathBuf) {
 
         options_vec.push(format!("-Djava.class.path={}", jar_path_abs.display()));
         options_vec.push(format!("-Djava.home={}", jre_root.display()));
+        options_vec.push(format!("-Djava.library.path={}", lib_base_dir.display()));
         options_vec.push(format!("-Djava.io.tmpdir={}", tmp_dir.display()));
 
         options_vec.push("-Djava.net.preferIPv4Stack=true".to_string());
         options_vec.push("-Djava.net.preferIPv6Addresses=false".to_string());
+        options_vec.push("-Dos.name=Linux".to_string());
+        options_vec.push("-Djava.vm.name=OpenJDK".to_string());
         options_vec.push("-Xmx512m".to_string());
         options_vec.push("-Xms256m".to_string());
         options_vec.push("-XX:TieredStopAtLevel=1".to_string());
