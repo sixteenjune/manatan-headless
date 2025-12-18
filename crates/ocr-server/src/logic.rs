@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::{io::Cursor, time::Duration};
 
 use anyhow::anyhow;
 use chrome_lens_ocr::LensClient;
@@ -292,6 +292,27 @@ fn decode_avif_custom(bytes: &[u8]) -> anyhow::Result<DynamicImage> {
 }
 
 pub async fn fetch_and_process(
+    url: &str,
+    user: Option<String>,
+    pass: Option<String>,
+) -> anyhow::Result<Vec<OcrResult>> {
+    let mut last_err = anyhow!("Unknown error");
+
+    // Try up to 3 times on Android
+    for attempt in 1..=3 {
+        match fetch_and_process_internal(url, user.clone(), pass.clone()).await {
+            Ok(res) => return Ok(res),
+            Err(e) => {
+                last_err = e;
+                tracing::warn!("Attempt {} failed for {}: {:?}", attempt, url, last_err);
+                tokio::time::sleep(Duration::from_secs(attempt)).await;
+            }
+        }
+    }
+    Err(last_err)
+}
+
+async fn fetch_and_process_internal(
     url: &str,
     user: Option<String>,
     pass: Option<String>,

@@ -34,8 +34,11 @@ pub async fn run_chapter_job(
     let save_lock = Arc::new(Mutex::new(()));
     let stream = futures::stream::iter(pages.into_iter());
 
+    // Change from 6 to 2 or 3 for Android stability
+    let concurrency_limit = if cfg!(target_os = "android") { 2 } else { 6 };
+
     stream
-        .for_each_concurrent(6, |url| {
+        .for_each_concurrent(concurrency_limit, |url| {
             let state = state.clone();
             let base_url = base_url.clone();
             let user = user.clone();
