@@ -373,7 +373,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android, armv7-linux-androideabi
 
       - name: Install cargo-apk2
         run: cargo install --git https://github.com/kolbyml/cargo-apk2
@@ -431,9 +431,19 @@ jobs:
 
           export RANLIB="$TOOLCHAIN_BIN/llvm-ranlib"
           export AR="$TOOLCHAIN_BIN/llvm-ar"
-          export CC="$TOOLCHAIN_BIN/aarch64-linux-android30-clang"
-          export CXX="$TOOLCHAIN_BIN/aarch64-linux-android30-clang++"
           
+          # --- CONFIG FOR AARCH64 (64-bit) ---
+          # We use target-specific env vars so cc-rs can find the right compiler for each arch
+          export CC_aarch64_linux_android="$TOOLCHAIN_BIN/aarch64-linux-android30-clang"
+          export CXX_aarch64_linux_android="$TOOLCHAIN_BIN/aarch64-linux-android30-clang++"
+          export AR_aarch64_linux_android="$TOOLCHAIN_BIN/llvm-ar"
+          
+          # --- CONFIG FOR ARMV7 (32-bit) ---
+          # Note the 'armv7a' prefix in the clang executable name
+          export CC_armv7_linux_androideabi="$TOOLCHAIN_BIN/armv7a-linux-androideabi30-clang"
+          export CXX_armv7_linux_androideabi="$TOOLCHAIN_BIN/armv7a-linux-androideabi30-clang++"
+          export AR_armv7_linux_androideabi="$TOOLCHAIN_BIN/llvm-ar"
+
           cargo apk2 build --release
 
       - name: Locate and Stage APK

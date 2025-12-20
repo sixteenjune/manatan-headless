@@ -88,7 +88,7 @@ source $HOME/.cargo/env
 2. **Add Android Target:**
 The CI targets `aarch64` (typical for modern phones). If you are running on an emulator, you might need `x86_64-linux-android` as well.
 ```bash
-rustup target add aarch64-linux-android
+rustup target add aarch64-linux-android armv7-linux-androideabi
 
 ```
 

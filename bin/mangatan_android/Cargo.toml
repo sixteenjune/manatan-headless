@@ -12,7 +12,7 @@ autobins = false
 
 [package.metadata.android]
 package = "com.mangatan.app"
-build_targets = ["Arm64V8a"]
+build_targets = ["Arm64V8a", "ArmV7a"]
 assets = "assets"
 java_sources = "java"
 
