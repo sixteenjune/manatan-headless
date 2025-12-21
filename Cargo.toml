@@ -1,6 +1,13 @@
 [workspace]
 default-members = ["bin/mangatan"]
-members = ["bin/mangatan", "bin/mangatan_android", "crates/core", "crates/ocr-server"]
+members = [
+    "bin/mangatan",
+    "bin/mangatan_android",
+    "bin/mangatan_ios/backend",
+    "crates/core",
+    "crates/ocr-server",
+]
+exclude = ["bin/mangatan"]
 resolver = "2"
 
 [workspace.package]

@@ -27,13 +27,11 @@ use axum::{
 };
 use eframe::egui;
 use futures::{SinkExt, StreamExt};
-use jni::objects::JString;
-use jni::sys::jobject;
 use jni::{
     JavaVM,
-    objects::{JObject, JValue},
+    objects::{JObject, JString, JValue},
     signature::{Primitive, ReturnType},
-    sys::{JNI_VERSION_1_6, jint},
+    sys::{JNI_VERSION_1_6, jint, jobject},
 };
 use lazy_static::lazy_static;
 use reqwest::Client;
@@ -944,8 +942,7 @@ struct AppState {
 }
 
 fn ensure_battery_unrestricted(app: &AndroidApp) {
-    use jni::objects::JObject;
-    use jni::objects::JValue;
+    use jni::objects::{JObject, JValue};
 
     let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
     let vm = unsafe { JavaVM::from_raw(vm_ptr).unwrap() };
@@ -1217,7 +1214,6 @@ fn check_and_request_permissions(app: &AndroidApp) {
 
             let string_cls = env.find_class("java/lang/String").unwrap();
 
-            // Create String[] { "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.READ_EXTERNAL_STORAGE" }
             let perms_array = env
                 .new_object_array(2, string_cls, JObject::null())
                 .unwrap();

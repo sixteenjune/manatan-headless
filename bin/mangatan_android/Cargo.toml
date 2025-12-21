@@ -82,33 +82,33 @@ name = "mangatan_android"
 crate-type = ["cdylib"]
 
 [target.'cfg(target_os = "android")'.dependencies]
+
+android-activity = { version = "0.6", features = ["native-activity"] }
+axum = { version = "0.8.7", features = ["macros", "multipart", "ws"] }
 # GUI
 eframe = { version = "0.29", default-features = false, features = ["wgpu", "android-native-activity" ] }
 egui = "0.29"
-winit = "0.30"
+futures = "0.3"
+jni = "0.21"
+lazy_static = "1.4"
+libc = "0.2"
+libloading = "0.8"
+mangatan-ocr-server.workspace = true
+mime_guess = "2"
+openssl = { version = "0.10", features = ["vendored"] }
 
 # Web Server & Networking
 # IMPORTANT: reqwest 0.12 uses http 1.0, matching axum 0.7
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
-axum = { version = "0.8.7", features = ["macros", "multipart", "ws"] }
-tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
+tar = "0.4"
 tokio = { version = "1", features = ["full"] }
-futures = "0.3"
-mime_guess = "2"
 
 # WebSockets
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
 
 # System
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-log = "0.2"
-libc = "0.2"
-jni = "0.21"
-libloading = "0.8"
-tar = "0.4"
-lazy_static = "1.4"
-mangatan-ocr-server.workspace = true
-openssl = { version = "0.10", features = ["vendored"] }
-
-android-activity = { version = "0.6", features = ["native-activity"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+winit = "0.30"
