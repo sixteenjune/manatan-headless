@@ -11,11 +11,12 @@ pub mod import;
 pub mod lookup;
 pub mod state;
 
-use handlers::{import_handler, list_dictionaries_handler, lookup_handler};
+use handlers::{import_handler, list_dictionaries_handler, lookup_handler, reset_db_handler};
 use lookup::LookupService;
 use state::AppState;
 
-const PREBAKED_DICT: &[u8] = include_bytes!("../assets/JMdict_english.zip");
+// FIX: Make this public so handlers can access it for reset logic
+pub const PREBAKED_DICT: &[u8] = include_bytes!("../assets/JMdict_english.zip");
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -31,10 +32,10 @@ pub fn create_router(data_dir: PathBuf) -> Router {
 
     let app_state_clone = state.app.clone();
 
+    // Background task to load or import dictionary
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-        // FIX: Access dictionaries directly, 'inner' no longer exists
         let needs_import = {
             let dicts = app_state_clone.dictionaries.read().expect("lock");
             dicts.is_empty()
@@ -59,6 +60,7 @@ pub fn create_router(data_dir: PathBuf) -> Router {
         .route("/lookup", get(lookup_handler))
         .route("/dictionaries", get(list_dictionaries_handler))
         .route("/import", post(import_handler))
+        .route("/reset", post(reset_db_handler))
         .layer(CorsLayer::permissive())
         .layer(RequestBodyLimitLayer::new(250 * 1024 * 1024))
         .with_state(state)

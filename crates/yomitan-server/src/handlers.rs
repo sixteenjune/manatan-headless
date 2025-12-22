@@ -40,6 +40,50 @@ pub struct ApiGroupedResult {
     pub forms: Vec<ApiForm>,
 }
 
+// --- RESET HANDLER ---
+pub async fn reset_db_handler(State(state): State<ServerState>) -> Json<Value> {
+    info!("🧨 [Yomitan] Resetting Database to Default...");
+    state.app.set_loading(true);
+
+    let app_state = state.app.clone();
+
+    // Perform blocking DB operations in a background thread
+    let res = tokio::task::spawn_blocking(move || {
+        // 1. Clear In-Memory State
+        {
+            let mut dicts = app_state.dictionaries.write().expect("lock");
+            dicts.clear();
+            let mut next_id = app_state.next_dict_id.write().expect("lock");
+            *next_id = 1;
+        }
+
+        // 2. Clear Database (Transactionally)
+        if let Ok(mut conn) = app_state.pool.get() {
+            if let Ok(tx) = conn.transaction() {
+                // Delete all data. VACUUM is optional (reclaims disk space but is slow).
+                let _ = tx.execute("DELETE FROM terms", []);
+                let _ = tx.execute("DELETE FROM metadata", []);
+                let _ = tx.commit();
+            }
+        }
+
+        // 3. Re-Import Default Dictionary
+        import::import_zip(&app_state, crate::PREBAKED_DICT)
+    })
+    .await
+    .unwrap();
+
+    state.app.set_loading(false);
+
+    match res {
+        Ok(msg) => Json(json!({ "status": "ok", "message": "Database reset successfully." })),
+        Err(e) => {
+            error!("❌ [Reset] Failed: {}", e);
+            Json(json!({ "status": "error", "message": e.to_string() }))
+        }
+    }
+}
+
 pub async fn lookup_handler(
     State(state): State<ServerState>,
     Query(params): Query<LookupParams>,
@@ -53,11 +97,9 @@ pub async fn lookup_handler(
         ));
     }
 
-    // Access dict metadata
     let dict_names: std::collections::HashMap<DictionaryId, String> = {
         let dicts = state.app.dictionaries.read().expect("lock");
         if dicts.is_empty() {
-            // OPTIONAL: You could try to count terms in DB here to check if DB is really empty
             return Ok(Json(vec![]));
         }
         dicts
@@ -207,10 +249,7 @@ fn calculate_furigana(headword: &str, reading: &str) -> Vec<(String, String)> {
 pub async fn list_dictionaries_handler(State(state): State<ServerState>) -> Json<Value> {
     let dicts = state.app.dictionaries.read().expect("lock");
     let list: Vec<_> = dicts.values().cloned().collect();
-
-    // Counting terms in DB can be slow, so we return a placeholder or cached value
-    let term_count = 0; // or execute "SELECT COUNT(*) FROM terms" if you really need it
-
+    let term_count = 0; // Simplified
     Json(
         json!({ "dictionaries": list, "total_terms": term_count, "status": if state.app.is_loading() { "loading" } else { "ready" } }),
     )
@@ -225,8 +264,6 @@ pub async fn import_handler(
             if let Ok(data) = field.bytes().await {
                 info!("📥 [Import API] Received upload ({} bytes)", data.len());
                 let app_state = state.app.clone();
-
-                // Note: import_zip now writes to DB
                 let res =
                     tokio::task::spawn_blocking(move || import::import_zip(&app_state, &data))
                         .await
