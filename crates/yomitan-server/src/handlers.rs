@@ -40,16 +40,110 @@ pub struct ApiGroupedResult {
     pub forms: Vec<ApiForm>,
 }
 
-// --- RESET HANDLER ---
+#[derive(Deserialize)]
+#[serde(tag = "action", content = "payload")]
+pub enum DictionaryAction {
+    Toggle { id: i64, enabled: bool },
+    Delete { id: i64 },
+    Reorder { order: Vec<i64> },
+}
+
+// --- DICTIONARY MANAGEMENT HANDLER ---
+pub async fn manage_dictionaries_handler(
+    State(state): State<ServerState>,
+    Json(action): Json<DictionaryAction>,
+) -> Json<Value> {
+    let app_state = state.app.clone();
+
+    // Spawn blocking task for DB operations
+    let res = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let mut conn = app_state.pool.get().map_err(|e| e.to_string())?;
+
+        // Track if we need to vacuum (reclaim disk space)
+        let mut should_vacuum = false;
+
+        // Scope the transaction so it drops (commits) BEFORE we try to VACUUM
+        {
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+            match action {
+                DictionaryAction::Toggle { id, enabled } => {
+                    tx.execute(
+                        "UPDATE dictionaries SET enabled = ? WHERE id = ?",
+                        rusqlite::params![enabled, id],
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                    let mut dicts = app_state.dictionaries.write().expect("lock");
+                    if let Some(d) = dicts.get_mut(&DictionaryId(id)) {
+                        d.enabled = enabled;
+                    }
+                }
+                DictionaryAction::Delete { id } => {
+                    info!("🗑️ [Yomitan] Deleting dictionary {}...", id);
+                    tx.execute(
+                        "DELETE FROM terms WHERE dictionary_id = ?",
+                        rusqlite::params![id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    tx.execute(
+                        "DELETE FROM dictionaries WHERE id = ?",
+                        rusqlite::params![id],
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                    let mut dicts = app_state.dictionaries.write().expect("lock");
+                    dicts.remove(&DictionaryId(id));
+
+                    // Mark for VACUUM since we deleted a lot of data
+                    should_vacuum = true;
+                }
+                DictionaryAction::Reorder { order } => {
+                    let mut stmt = tx
+                        .prepare("UPDATE dictionaries SET priority = ? WHERE id = ?")
+                        .map_err(|e| e.to_string())?;
+                    let mut dicts = app_state.dictionaries.write().expect("lock");
+
+                    for (index, id) in order.iter().enumerate() {
+                        let priority = index as i64;
+                        stmt.execute(rusqlite::params![priority, id])
+                            .map_err(|e| e.to_string())?;
+
+                        if let Some(d) = dicts.get_mut(&DictionaryId(*id)) {
+                            d.priority = priority;
+                        }
+                    }
+                }
+            }
+
+            tx.commit().map_err(|e| e.to_string())?;
+        } // Transaction ends here
+
+        // VACUUM must run outside of a transaction
+        if should_vacuum {
+            info!("🧹 [Yomitan] Vacuuming database to reclaim disk space...");
+            conn.execute("VACUUM", []).map_err(|e| e.to_string())?;
+            info!("✨ [Yomitan] Vacuum complete.");
+        }
+
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    match res {
+        Ok(_) => Json(json!({ "status": "ok" })),
+        Err(e) => Json(json!({ "status": "error", "message": e })),
+    }
+}
+
 pub async fn reset_db_handler(State(state): State<ServerState>) -> Json<Value> {
     info!("🧨 [Yomitan] Resetting Database to Default...");
     state.app.set_loading(true);
 
     let app_state = state.app.clone();
 
-    // Perform blocking DB operations in a background thread
     let res = tokio::task::spawn_blocking(move || {
-        // 1. Clear In-Memory State
         {
             let mut dicts = app_state.dictionaries.write().expect("lock");
             dicts.clear();
@@ -57,17 +151,19 @@ pub async fn reset_db_handler(State(state): State<ServerState>) -> Json<Value> {
             *next_id = 1;
         }
 
-        // 2. Clear Database (Transactionally)
         if let Ok(mut conn) = app_state.pool.get() {
+            // 1. Delete all data
             if let Ok(tx) = conn.transaction() {
-                // Delete all data. VACUUM is optional (reclaims disk space but is slow).
                 let _ = tx.execute("DELETE FROM terms", []);
+                let _ = tx.execute("DELETE FROM dictionaries", []);
                 let _ = tx.execute("DELETE FROM metadata", []);
                 let _ = tx.commit();
             }
+            // 2. Reclaim space immediately (since we deleted everything)
+            info!("🧹 [Yomitan] Vacuuming after reset...");
+            let _ = conn.execute("VACUUM", []);
         }
 
-        // 3. Re-Import Default Dictionary
         import::import_zip(&app_state, crate::PREBAKED_DICT)
     })
     .await
@@ -97,18 +193,12 @@ pub async fn lookup_handler(
         ));
     }
 
-    let dict_names: std::collections::HashMap<DictionaryId, String> = {
-        let dicts = state.app.dictionaries.read().expect("lock");
-        if dicts.is_empty() {
-            return Ok(Json(vec![]));
-        }
-        dicts
-            .iter()
-            .map(|(k, v)| (*k, v.meta.name.clone()))
-            .collect()
-    };
-
     let raw_results = state.lookup.search(&state.app, &params.text, cursor_idx);
+
+    let dict_meta: std::collections::HashMap<DictionaryId, String> = {
+        let dicts = state.app.dictionaries.read().expect("lock");
+        dicts.iter().map(|(k, v)| (*k, v.name.clone())).collect()
+    };
 
     struct Aggregator {
         headword: String,
@@ -153,7 +243,7 @@ pub async fn lookup_handler(
             (json!(entry.record), vec![])
         };
 
-        let dict_name = dict_names
+        let dict_name = dict_meta
             .get(&entry.source)
             .cloned()
             .unwrap_or("Unknown".to_string());
@@ -248,10 +338,10 @@ fn calculate_furigana(headword: &str, reading: &str) -> Vec<(String, String)> {
 
 pub async fn list_dictionaries_handler(State(state): State<ServerState>) -> Json<Value> {
     let dicts = state.app.dictionaries.read().expect("lock");
-    let list: Vec<_> = dicts.values().cloned().collect();
-    let term_count = 0; // Simplified
+    let mut list: Vec<_> = dicts.values().cloned().collect();
+    list.sort_by_key(|d| d.priority);
     Json(
-        json!({ "dictionaries": list, "total_terms": term_count, "status": if state.app.is_loading() { "loading" } else { "ready" } }),
+        json!({ "dictionaries": list, "status": if state.app.is_loading() { "loading" } else { "ready" } }),
     )
 }
 
@@ -259,25 +349,47 @@ pub async fn import_handler(
     State(state): State<ServerState>,
     mut multipart: Multipart,
 ) -> Json<Value> {
-    while let Some(field) = multipart.next_field().await.unwrap() {
-        if field.name() == Some("file") {
-            if let Ok(data) = field.bytes().await {
-                info!("📥 [Import API] Received upload ({} bytes)", data.len());
-                let app_state = state.app.clone();
-                let res =
-                    tokio::task::spawn_blocking(move || import::import_zip(&app_state, &data))
-                        .await
-                        .unwrap();
-                return match res {
-                    Ok(msg) => {
-                        info!("✅ {}", msg);
-                        Json(json!({ "status": "ok", "message": msg }))
+    loop {
+        let field_result = multipart.next_field().await;
+
+        match field_result {
+            Ok(Some(field)) => {
+                if field.name() == Some("file") {
+                    match field.bytes().await {
+                        Ok(data) => {
+                            info!("📥 [Import API] Received upload ({} bytes)", data.len());
+                            let app_state = state.app.clone();
+                            let res = tokio::task::spawn_blocking(move || {
+                                import::import_zip(&app_state, &data)
+                            })
+                            .await
+                            .unwrap();
+                            return match res {
+                                Ok(msg) => {
+                                    info!("✅ {}", msg);
+                                    Json(json!({ "status": "ok", "message": msg }))
+                                }
+                                Err(e) => {
+                                    error!("❌ {}", e);
+                                    Json(json!({ "status": "error", "message": e.to_string() }))
+                                }
+                            };
+                        }
+                        Err(e) => {
+                            error!("❌ [Import API] Failed to read field bytes: {}", e);
+                            return Json(
+                                json!({ "status": "error", "message": format!("Upload Failed: {}", e) }),
+                            );
+                        }
                     }
-                    Err(e) => {
-                        error!("❌ {}", e);
-                        Json(json!({ "status": "error", "message": e.to_string() }))
-                    }
-                };
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                error!("❌ [Import API] Multipart error: {}", e);
+                return Json(
+                    json!({ "status": "error", "message": format!("Multipart Error: {}", e) }),
+                );
             }
         }
     }

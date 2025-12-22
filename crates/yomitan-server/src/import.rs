@@ -1,10 +1,10 @@
-use crate::state::{AppState, StoredRecord};
+use crate::state::{AppState, DictionaryData, StoredRecord};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::io::Read;
 use tracing::info;
 use wordbase_api::{
-    Dictionary, DictionaryId, DictionaryKind, DictionaryMeta, Record,
+    DictionaryId, DictionaryKind, DictionaryMeta, Record,
     dict::yomitan::{Glossary, structured},
 };
 use zip::ZipArchive;
@@ -18,7 +18,6 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
     let mut zip = ZipArchive::new(std::io::Cursor::new(data))?;
 
     // 1. Find index.json
-    // FIX: Use a loop instead of iterator to avoid "captured variable cannot escape FnMut" error
     let mut index_file_name = None;
     for i in 0..zip.len() {
         if let Ok(file) = zip.by_index(i) {
@@ -47,32 +46,42 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
 
     let dict_name = meta.name.clone();
 
-    // 2. Register Dictionary Metadata (In Memory)
+    // 2. Database Transaction Setup
+    let mut conn = state.pool.get()?;
+    let tx = conn.transaction()?;
+
+    // 3. Register Dictionary in DB and Memory
     let dict_id;
     {
         let mut next_id = state.next_dict_id.write().expect("lock");
         dict_id = DictionaryId(*next_id);
         *next_id += 1;
 
+        // Insert into DB
+        tx.execute(
+            "INSERT INTO dictionaries (id, name, priority, enabled) VALUES (?, ?, ?, ?)",
+            rusqlite::params![dict_id.0, dict_name, 0, true],
+        )?;
+
+        // Update Memory
         let mut dicts = state.dictionaries.write().expect("lock");
         dicts.insert(
             dict_id,
-            Dictionary {
+            DictionaryData {
                 id: dict_id,
-                meta,
-                position: 0,
+                name: dict_name.clone(),
+                priority: 0,
+                enabled: true,
             },
         );
     }
-
-    // 3. Database Transaction Setup
-    let mut conn = state.pool.get()?;
-    let tx = conn.transaction()?;
 
     // 4. Scan for term banks and Insert
     let file_names: Vec<String> = (0..zip.len())
         .filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string()))
         .collect();
+
+    let mut terms_found = 0;
 
     for name in file_names {
         if name.contains("term_bank") && name.ends_with(".json") {
@@ -83,7 +92,9 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
 
             let bank: Vec<Value> = serde_json::from_str(&s).unwrap_or_default();
 
-            let mut stmt = tx.prepare("INSERT INTO terms (term, json) VALUES (?, ?)")?;
+            // Note: Added dictionary_id column to INSERT
+            let mut stmt =
+                tx.prepare("INSERT INTO terms (term, dictionary_id, json) VALUES (?, ?, ?)")?;
 
             for entry in bank {
                 if let Some(arr) = entry.as_array() {
@@ -138,11 +149,12 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                     let json_val = serde_json::to_string(&stored)?;
 
                     // Insert Headword mapping
-                    stmt.execute(rusqlite::params![headword, json_val])?;
+                    stmt.execute(rusqlite::params![headword, dict_id.0, json_val])?;
+                    terms_found += 1;
 
-                    // Insert Reading mapping (if different)
+                    // Insert Reading mapping
                     if let Some(r) = stored_reading {
-                        stmt.execute(rusqlite::params![r, json_val])?;
+                        stmt.execute(rusqlite::params![r, dict_id.0, json_val])?;
                     }
                 }
             }
@@ -150,7 +162,10 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
     }
 
     tx.commit()?;
-    info!("💾 [Import] Database transaction committed.");
+    info!(
+        "💾 [Import] Database transaction committed. Total Terms: {}",
+        terms_found
+    );
 
     Ok(format!("Imported '{}'", dict_name))
 }

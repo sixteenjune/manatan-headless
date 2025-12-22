@@ -5,10 +5,10 @@ use lindera::{
     segmenter::Segmenter,
     tokenizer::Tokenizer,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{error, info};
-use wordbase_api::{FrequencyValue, Record, RecordEntry, RecordId, Span, Term};
+use wordbase_api::{DictionaryId, FrequencyValue, Record, RecordEntry, RecordId, Span, Term};
 
 pub struct LookupService {
     tokenizer: Arc<Tokenizer>,
@@ -39,7 +39,7 @@ impl LookupService {
         let mut results = Vec::new();
         let mut processed_candidates = HashSet::new();
 
-        // Get DB connection
+        // 1. Get DB connection
         let conn = match state.pool.get() {
             Ok(c) => c,
             Err(e) => {
@@ -48,8 +48,17 @@ impl LookupService {
             }
         };
 
-        // Prepare Statement
-        let mut stmt = match conn.prepare("SELECT json FROM terms WHERE term = ?") {
+        // 2. Get Dictionary Configs (Priority & Enabled)
+        let dict_configs: HashMap<DictionaryId, (bool, i64)> = {
+            let dicts = state.dictionaries.read().expect("lock");
+            dicts
+                .iter()
+                .map(|(id, d)| (*id, (d.enabled, d.priority)))
+                .collect()
+        };
+
+        // 3. Prepare Statement (Fetching dictionary_id too)
+        let mut stmt = match conn.prepare("SELECT dictionary_id, json FROM terms WHERE term = ?") {
             Ok(s) => s,
             Err(e) => {
                 error!("❌ DB Prepare Error: {}", e);
@@ -79,15 +88,24 @@ impl LookupService {
                 }
                 processed_candidates.insert(candidate.word.clone());
 
-                // QUERY SQLITE
                 let rows = stmt.query_map(rusqlite::params![candidate.word], |row| {
-                    let json_str: String = row.get(0)?;
-                    Ok(json_str)
+                    let dict_id: i64 = row.get(0)?;
+                    let json_str: String = row.get(1)?;
+                    Ok((dict_id, json_str))
                 });
 
                 if let Ok(mapped_rows) = rows {
                     for row_result in mapped_rows {
-                        if let Ok(json_str) = row_result {
+                        if let Ok((dict_id_raw, json_str)) = row_result {
+                            let dict_id = DictionaryId(dict_id_raw);
+
+                            // CHECK ENABLED
+                            if let Some((enabled, _)) = dict_configs.get(&dict_id) {
+                                if !*enabled {
+                                    continue;
+                                }
+                            }
+
                             if let Ok(stored) = serde_json::from_str::<StoredRecord>(&json_str) {
                                 let estimated_len = candidate.word.chars().count();
                                 let term_obj = Term::from_parts(
@@ -128,10 +146,22 @@ impl LookupService {
 
         // Sort results
         results.sort_by(|a, b| {
+            // 1. Sort by Length (Longest Match First)
             let len_cmp = b.span_chars.end.cmp(&a.span_chars.end);
             if len_cmp != std::cmp::Ordering::Equal {
                 return len_cmp;
             }
+
+            // 2. Sort by Dictionary Priority (Lower Index = Higher Priority)
+            let prio_a = dict_configs.get(&a.source).map(|(_, p)| *p).unwrap_or(999);
+            let prio_b = dict_configs.get(&b.source).map(|(_, p)| *p).unwrap_or(999);
+
+            let prio_cmp = prio_a.cmp(&prio_b);
+            if prio_cmp != std::cmp::Ordering::Equal {
+                return prio_cmp;
+            }
+
+            // 3. Sort by Frequency/Popularity
             let get_val = |f: Option<&FrequencyValue>| -> i64 {
                 match f {
                     Some(FrequencyValue::Rank(v)) => *v,
