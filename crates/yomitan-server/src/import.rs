@@ -1,8 +1,8 @@
 use crate::state::{AppState, StoredRecord};
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::io::{Cursor, Read};
-use tracing::{error, info};
+use std::io::Read;
+use tracing::info;
 use wordbase_api::{
     Dictionary, DictionaryId, DictionaryKind, DictionaryMeta, Record,
     dict::yomitan::{Glossary, structured},
@@ -15,22 +15,25 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
         data.len()
     );
 
-    let mut zip = ZipArchive::new(Cursor::new(data))?;
-    let mut meta: Option<DictionaryMeta> = None;
-    let mut terms_found = 0;
+    let mut zip = ZipArchive::new(std::io::Cursor::new(data))?;
 
     // 1. Find index.json
-    let mut index_path = None;
+    // FIX: Use a loop instead of iterator to avoid "captured variable cannot escape FnMut" error
+    let mut index_file_name = None;
     for i in 0..zip.len() {
-        let file = zip.by_index(i)?;
-        if file.name().ends_with("index.json") {
-            index_path = Some(file.name().to_string());
-            break;
+        if let Ok(file) = zip.by_index(i) {
+            if file.name().ends_with("index.json") {
+                index_file_name = Some(file.name().to_string());
+                break;
+            }
         }
     }
 
-    if let Some(path) = index_path {
-        let mut file = zip.by_name(&path)?;
+    let index_file_name =
+        index_file_name.ok_or_else(|| anyhow::anyhow!("No index.json found in zip"))?;
+
+    let meta = {
+        let mut file = zip.by_name(&index_file_name)?;
         let mut s = String::new();
         file.read_to_string(&mut s)?;
         let json: Value = serde_json::from_str(&s)?;
@@ -39,22 +42,20 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
         let mut dm = DictionaryMeta::new(DictionaryKind::Yomitan, name);
         dm.version = json["revision"].as_str().map(|s| s.to_string());
         dm.description = json["description"].as_str().map(|s| s.to_string());
+        dm
+    };
 
-        meta = Some(dm);
-    } else {
-        return Err(anyhow::anyhow!("No index.json found in zip"));
-    }
-
-    let meta = meta.unwrap(); // Safe due to check above
     let dict_name = meta.name.clone();
 
-    // 2. Register Dictionary
+    // 2. Register Dictionary Metadata (In Memory)
     let dict_id;
     {
-        let mut db = state.inner.write().expect("lock");
-        dict_id = DictionaryId(db.next_dict_id);
-        db.next_dict_id += 1;
-        db.dictionaries.insert(
+        let mut next_id = state.next_dict_id.write().expect("lock");
+        dict_id = DictionaryId(*next_id);
+        *next_id += 1;
+
+        let mut dicts = state.dictionaries.write().expect("lock");
+        dicts.insert(
             dict_id,
             Dictionary {
                 id: dict_id,
@@ -64,7 +65,11 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
         );
     }
 
-    // 3. Scan for term banks
+    // 3. Database Transaction Setup
+    let mut conn = state.pool.get()?;
+    let tx = conn.transaction()?;
+
+    // 4. Scan for term banks and Insert
     let file_names: Vec<String> = (0..zip.len())
         .filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string()))
         .collect();
@@ -77,7 +82,8 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
             file.read_to_string(&mut s)?;
 
             let bank: Vec<Value> = serde_json::from_str(&s).unwrap_or_default();
-            let mut db = state.inner.write().expect("lock");
+
+            let mut stmt = tx.prepare("INSERT INTO terms (term, json) VALUES (?, ?)")?;
 
             for entry in bank {
                 if let Some(arr) = entry.as_array() {
@@ -101,13 +107,10 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                         continue;
                     }
 
-                    // --- PARSE TAGS ---
-                    // Yomitan stores tags as space-separated string at index 2
                     let tags_raw = arr.get(2).and_then(|v| v.as_str()).unwrap_or("");
                     let mut tags_vec = Vec::new();
                     if !tags_raw.is_empty() {
                         for t_str in tags_raw.split_whitespace() {
-                            // Try to deserialize string into GlossaryTag type via JSON
                             if let Ok(tag) = serde_json::from_value(json!(t_str)) {
                                 tags_vec.push(tag);
                             }
@@ -132,29 +135,22 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                         reading: stored_reading.clone(),
                     };
 
-                    db.index
-                        .entry(headword.to_string())
-                        .or_default()
-                        .push(stored.clone());
+                    let json_val = serde_json::to_string(&stored)?;
 
+                    // Insert Headword mapping
+                    stmt.execute(rusqlite::params![headword, json_val])?;
+
+                    // Insert Reading mapping (if different)
                     if let Some(r) = stored_reading {
-                        db.index.entry(r).or_default().push(stored);
+                        stmt.execute(rusqlite::params![r, json_val])?;
                     }
-
-                    terms_found += 1;
                 }
             }
         }
     }
 
-    if let Err(e) = state.save() {
-        error!("❌ [Import] Failed to save state: {}", e);
-    } else {
-        info!("💾 [Import] State saved. Total Terms: {}", terms_found);
-    }
+    tx.commit()?;
+    info!("💾 [Import] Database transaction committed.");
 
-    Ok(format!(
-        "Imported '{}' with {} terms",
-        dict_name, terms_found
-    ))
+    Ok(format!("Imported '{}'", dict_name))
 }

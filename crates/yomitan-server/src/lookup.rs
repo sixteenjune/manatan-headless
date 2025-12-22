@@ -1,4 +1,4 @@
-use crate::state::AppState;
+use crate::state::{AppState, StoredRecord};
 use lindera::{
     dictionary::{DictionaryKind, load_dictionary_from_kind},
     mode::Mode,
@@ -7,7 +7,7 @@ use lindera::{
 };
 use std::collections::HashSet;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 use wordbase_api::{FrequencyValue, Record, RecordEntry, RecordId, Span, Term};
 
 pub struct LookupService {
@@ -36,12 +36,26 @@ impl LookupService {
     }
 
     pub fn search(&self, state: &AppState, text: &str, cursor_offset: usize) -> Vec<RecordEntry> {
-        let db = state.inner.read().expect("lock");
         let mut results = Vec::new();
-
-        // Only deduplicate the SEARCH CANDIDATE (the string we look up).
-        // We DO NOT deduplicate the results yet, so we can capture all readings.
         let mut processed_candidates = HashSet::new();
+
+        // Get DB connection
+        let conn = match state.pool.get() {
+            Ok(c) => c,
+            Err(e) => {
+                error!("❌ Failed to get DB connection: {}", e);
+                return vec![];
+            }
+        };
+
+        // Prepare Statement
+        let mut stmt = match conn.prepare("SELECT json FROM terms WHERE term = ?") {
+            Ok(s) => s,
+            Err(e) => {
+                error!("❌ DB Prepare Error: {}", e);
+                return vec![];
+            }
+        };
 
         let start_index = self.snap_to_char_boundary(text, cursor_offset);
         if start_index >= text.len() {
@@ -53,7 +67,6 @@ impl LookupService {
 
         for len in (1..=chars.len()).rev() {
             let substring: String = chars[0..len].iter().collect();
-
             let candidates = self.generate_candidates(&substring);
 
             for candidate in candidates {
@@ -66,50 +79,59 @@ impl LookupService {
                 }
                 processed_candidates.insert(candidate.word.clone());
 
-                if let Some(records) = db.index.get(&candidate.word) {
-                    for stored in records {
-                        // info!("   ✅ Match: '{}' (Reading: {:?})", candidate.word, stored.reading);
+                // QUERY SQLITE
+                let rows = stmt.query_map(rusqlite::params![candidate.word], |row| {
+                    let json_str: String = row.get(0)?;
+                    Ok(json_str)
+                });
 
-                        let estimated_len = candidate.word.chars().count();
+                if let Ok(mapped_rows) = rows {
+                    for row_result in mapped_rows {
+                        if let Ok(json_str) = row_result {
+                            if let Ok(stored) = serde_json::from_str::<StoredRecord>(&json_str) {
+                                let estimated_len = candidate.word.chars().count();
+                                let term_obj = Term::from_parts(
+                                    Some(candidate.word.as_str()),
+                                    stored.reading.as_deref(),
+                                )
+                                .unwrap_or_else(|| {
+                                    Term::from_headword(candidate.word.clone()).unwrap()
+                                });
 
-                        let term_obj = Term::from_parts(
-                            Some(candidate.word.as_str()),
-                            stored.reading.as_deref(),
-                        )
-                        .unwrap_or_else(|| Term::from_headword(candidate.word.clone()).unwrap());
+                                let mut freq = 0;
+                                if let Record::YomitanGlossary(g) = &stored.record {
+                                    freq = g.popularity;
+                                }
 
-                        let mut freq = 0;
-                        if let Record::YomitanGlossary(g) = &stored.record {
-                            freq = g.popularity;
+                                results.push(RecordEntry {
+                                    span_bytes: Span {
+                                        start: 0,
+                                        end: candidate.word.len() as u64,
+                                    },
+                                    span_chars: Span {
+                                        start: 0,
+                                        end: estimated_len as u64,
+                                    },
+                                    source: stored.dictionary_id,
+                                    term: term_obj,
+                                    record_id: RecordId(0),
+                                    record: stored.record.clone(),
+                                    profile_sorting_frequency: None,
+                                    source_sorting_frequency: Some(FrequencyValue::Rank(freq)),
+                                });
+                            }
                         }
-
-                        results.push(RecordEntry {
-                            span_bytes: Span {
-                                start: 0,
-                                end: candidate.word.len() as u64,
-                            },
-                            span_chars: Span {
-                                start: 0,
-                                end: estimated_len as u64,
-                            },
-                            source: stored.dictionary_id,
-                            term: term_obj,
-                            record_id: RecordId(0),
-                            record: stored.record.clone(),
-                            profile_sorting_frequency: None,
-                            source_sorting_frequency: Some(FrequencyValue::Rank(freq)),
-                        });
                     }
                 }
             }
         }
 
+        // Sort results
         results.sort_by(|a, b| {
             let len_cmp = b.span_chars.end.cmp(&a.span_chars.end);
             if len_cmp != std::cmp::Ordering::Equal {
                 return len_cmp;
             }
-
             let get_val = |f: Option<&FrequencyValue>| -> i64 {
                 match f {
                     Some(FrequencyValue::Rank(v)) => *v,
@@ -117,11 +139,8 @@ impl LookupService {
                     None => 0,
                 }
             };
-
-            let freq_a = get_val(a.source_sorting_frequency.as_ref());
-            let freq_b = get_val(b.source_sorting_frequency.as_ref());
-
-            freq_b.cmp(&freq_a)
+            get_val(b.source_sorting_frequency.as_ref())
+                .cmp(&get_val(a.source_sorting_frequency.as_ref()))
         });
 
         results

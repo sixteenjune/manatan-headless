@@ -5,10 +5,9 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
-use serde_json::{Value, json};
+use serde_json::{Value, Value as JsonValue, json};
 use tracing::{error, info};
-use wordbase_api::{DictionaryId, Record, RecordEntry, Term};
+use wordbase_api::{DictionaryId, Record, Term};
 
 #[derive(Deserialize)]
 pub struct LookupParams {
@@ -54,12 +53,14 @@ pub async fn lookup_handler(
         ));
     }
 
+    // Access dict metadata
     let dict_names: std::collections::HashMap<DictionaryId, String> = {
-        let db = state.app.inner.read().expect("lock");
-        if db.dictionaries.is_empty() {
+        let dicts = state.app.dictionaries.read().expect("lock");
+        if dicts.is_empty() {
+            // OPTIONAL: You could try to count terms in DB here to check if DB is really empty
             return Ok(Json(vec![]));
         }
-        db.dictionaries
+        dicts
             .iter()
             .map(|(k, v)| (*k, v.meta.name.clone()))
             .collect()
@@ -78,9 +79,6 @@ pub async fn lookup_handler(
     let mut map: Vec<Aggregator> = Vec::new();
 
     for entry in raw_results {
-        // --- FIX: Handle Term::Reading correctly ---
-        // If the term is ONLY a reading (e.g. kana match), use the reading as the headword
-        // so we don't produce an empty headword that gets skipped.
         let (headword, reading) = match &entry.term {
             Term::Full(h, r) => (h.to_string(), r.to_string()),
             Term::Headword(h) => (h.to_string(), "".to_string()),
@@ -168,11 +166,6 @@ pub async fn lookup_handler(
         })
         .collect();
 
-    info!(
-        "✅ [Lookup API] Sending {} grouped results",
-        final_results.len()
-    );
-
     Ok(Json(final_results))
 }
 
@@ -212,11 +205,14 @@ fn calculate_furigana(headword: &str, reading: &str) -> Vec<(String, String)> {
 }
 
 pub async fn list_dictionaries_handler(State(state): State<ServerState>) -> Json<Value> {
-    let db = state.app.inner.read().expect("lock");
-    let dicts: Vec<_> = db.dictionaries.values().cloned().collect();
-    let term_count = db.index.len();
+    let dicts = state.app.dictionaries.read().expect("lock");
+    let list: Vec<_> = dicts.values().cloned().collect();
+
+    // Counting terms in DB can be slow, so we return a placeholder or cached value
+    let term_count = 0; // or execute "SELECT COUNT(*) FROM terms" if you really need it
+
     Json(
-        json!({ "dictionaries": dicts, "total_terms": term_count, "status": if state.app.is_loading() { "loading" } else { "ready" } }),
+        json!({ "dictionaries": list, "total_terms": term_count, "status": if state.app.is_loading() { "loading" } else { "ready" } }),
     )
 }
 
@@ -229,6 +225,8 @@ pub async fn import_handler(
             if let Ok(data) = field.bytes().await {
                 info!("📥 [Import API] Received upload ({} bytes)", data.len());
                 let app_state = state.app.clone();
+
+                // Note: import_zip now writes to DB
                 let res =
                     tokio::task::spawn_blocking(move || import::import_zip(&app_state, &data))
                         .await
