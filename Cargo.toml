@@ -17,6 +17,7 @@ edition = "2024"
 keywords = [
     "manga",
     "suwayomi",
+    "mangatan",
     "ocr",
     "language learning",
     "japanese",
