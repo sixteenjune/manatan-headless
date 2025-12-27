@@ -567,7 +567,7 @@ jobs:
   # --- JOB 6: Release (Combines Everything) ---
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build_mangatan, build_android]
+    needs: [build_mangatan, build_android, build_ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
