@@ -19,6 +19,8 @@ Traditional setups for reading manga with Japanese lookup (OCR) can be complicat
 | :---: | :---: | :---: | :---: | :---: |
 | ✅ | ✅ | ✅ | ✅ | ✅ |
 
+> **📱 iOS Users:** The iOS app is currently in **Public Beta**. Please join our [Discord Server](https://discord.gg/tDAtpPN8KK) to find the TestFlight invite link.
+
 ## 🚀 Getting Started
 
 Download the latest release for your platform from the [Releases](https://github.com/KolbyML/Mangatan/releases) page.
