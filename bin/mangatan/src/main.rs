@@ -227,7 +227,9 @@ impl MyApp {
         // Optional: Trigger a check immediately on startup
         let status_clone = update_status.clone();
         std::thread::spawn(move || {
-            check_for_updates(status_clone);
+            if !is_flatpak() {
+                check_for_updates(status_clone);
+            }
         });
 
         Self {
@@ -301,22 +303,26 @@ impl eframe::App for MyApp {
             ui.horizontal(|ui| {
                 ui.heading("Mangatan");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let status = self
-                        .update_status
-                        .lock()
-                        .expect("lock shouldn't panic")
-                        .clone();
-                    match status {
-                        UpdateStatus::Idle | UpdateStatus::UpToDate => {
-                            if ui.small_button("🔄 Check Updates").clicked() {
-                                let status_clone = self.update_status.clone();
-                                std::thread::spawn(move || check_for_updates(status_clone));
+                    if is_flatpak() {
+                        ui.weak(format!("Flatpak: {}", APP_VERSION));
+                    } else {
+                        let status = self
+                            .update_status
+                            .lock()
+                            .expect("lock shouldn't panic")
+                            .clone();
+                        match status {
+                            UpdateStatus::Idle | UpdateStatus::UpToDate => {
+                                if ui.small_button("🔄 Check Updates").clicked() {
+                                    let status_clone = self.update_status.clone();
+                                    std::thread::spawn(move || check_for_updates(status_clone));
+                                }
                             }
+                            UpdateStatus::Checking => {
+                                ui.spinner();
+                            }
+                            _ => {} // Handle active updates in the main body
                         }
-                        UpdateStatus::Checking => {
-                            ui.spinner();
-                        }
-                        _ => {} // Handle active updates in the main body
                     }
                 });
             });
@@ -965,4 +971,8 @@ async fn current_version_handler() -> impl IntoResponse {
         version: APP_VERSION.to_string(),
         variant: "desktop".to_string(), // Frontend will see 'desktop' and HIDE the button
     })
+}
+
+fn is_flatpak() -> bool {
+    std::env::var("FLATPAK_ID").is_ok()
 }
