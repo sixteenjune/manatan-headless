@@ -74,6 +74,11 @@ void* run_java_thread(void* arg) {
 int main(int argc, char * argv[]) {
     NSString *bundlePath = [[NSBundle mainBundle] resourcePath];
     NSString *docDir = getDocumentsDirectory();
+
+    NSString *version = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+    if (!version) {
+        version = @"1.0.0"; // Fallback
+    }
     
     // 1. Suwayomi Configs/DBs -> 'suwayomi' subfolder (Hidden from root view)
     NSString *suwayomiDataDir = [docDir stringByAppendingPathComponent:@"suwayomi"];
@@ -147,7 +152,7 @@ int main(int argc, char * argv[]) {
 
     fprintf(stderr, "Starting Rust Server...\n");
     // Rust server works within the suwayomiDataDir context for configs
-    start_rust_server([bundlePath UTF8String], [docDir UTF8String]);
+    start_rust_server([bundlePath UTF8String], [docDir UTF8String], [version UTF8String]);
 
     fprintf(stderr, "Spawning Java Thread...\n");
     pthread_t thread;

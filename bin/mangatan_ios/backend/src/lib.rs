@@ -39,6 +39,7 @@ use tracing::{error, info, warn};
 struct AppState {
     client: Client,
     webui_dir: PathBuf,
+    app_version: String,
 }
 
 #[derive(Serialize)]
@@ -57,7 +58,11 @@ pub extern "C" fn is_server_ready() -> bool {
 
 #[allow(clippy::missing_safety_doc)]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn start_rust_server(bundle_path: *const c_char, docs_path: *const c_char) {
+pub unsafe extern "C" fn start_rust_server(
+    bundle_path: *const c_char,
+    docs_path: *const c_char,
+    version: *const c_char,
+) {
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .try_init();
@@ -75,12 +80,13 @@ pub unsafe extern "C" fn start_rust_server(bundle_path: *const c_char, docs_path
             .to_str()
             .expect("Expect to convert cstr to str")
     };
+    let version_str = unsafe { CStr::from_ptr(version).to_str().unwrap().to_string() };
     let bundle = PathBuf::from(bundle_str);
 
     thread::spawn(move || {
         let rt = Runtime::new().expect("Should be able to get tokio runtime");
         rt.block_on(async {
-            if let Err(e) = start_web_server(bundle, docs).await {
+            if let Err(e) = start_web_server(bundle, docs, version_str).await {
                 error!("❌ Axum Server failed: {}", e);
             }
         });
@@ -128,6 +134,7 @@ pub unsafe extern "C" fn start_rust_server(bundle_path: *const c_char, docs_path
 async fn start_web_server(
     bundle_dir: PathBuf,
     data_dir: PathBuf,
+    app_version: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("🚀 Initializing Axum Proxy Server on port 4568...");
     let ocr_router = mangatan_ocr_server::create_router(data_dir.clone());
@@ -136,6 +143,7 @@ async fn start_web_server(
     let state = AppState {
         client: Client::new(),
         webui_dir: bundle_dir.join("webui"),
+        app_version,
     };
 
     let cors = CorsLayer::new()
@@ -384,10 +392,10 @@ fn tungstenite_to_axum(msg: TungsteniteMessage) -> Message {
     }
 }
 
-async fn current_version_handler() -> impl IntoResponse {
+async fn current_version_handler(State(state): State<AppState>) -> impl IntoResponse {
     let version = env!("CARGO_PKG_VERSION");
     axum::Json(VersionResponse {
-        version: version.to_string(),
+        version: state.app_version,
         variant: "ios".to_string(),
     })
 }
