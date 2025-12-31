@@ -8,8 +8,8 @@
 extern void loadfunctions();
 extern jint JNI_OnLoad_management(JavaVM *vm, void *reserved);
 extern jint JNI_OnLoad_management_ext(JavaVM *vm, void *reserved);
-extern jint JNI_OnLoad_awt(JavaVM *vm, void *reserved);
-extern jint JNI_OnLoad_awt_headless(JavaVM *vm, void *reserved);
+// extern jint JNI_OnLoad_awt(JavaVM *vm, void *reserved);
+// extern jint JNI_OnLoad_awt_headless(JavaVM *vm, void *reserved);
 
 extern void start_rust_server(const char* bundle_path, const char* docs_path);
 
@@ -140,8 +140,8 @@ int main(int argc, char * argv[]) {
         return 1;
     }
     
-    JNI_OnLoad_awt(globalJVM, NULL);
-    JNI_OnLoad_awt_headless(globalJVM, NULL);    
+    // JNI_OnLoad_awt(globalJVM, NULL);
+    // JNI_OnLoad_awt_headless(globalJVM, NULL);    
     JNI_OnLoad_management(globalJVM, NULL);
     JNI_OnLoad_management_ext(globalJVM, NULL);
 
