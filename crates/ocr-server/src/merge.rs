@@ -9,7 +9,8 @@ lazy_static! {
     static ref NO_SPACE_LANGUAGE_REGEX: Regex =
         Regex::new(r"[\p{Hiragana}\p{Katakana}\p{Han}]").unwrap();
     static ref LINE_NOISE_REGEX: Regex = Regex::new(r"^[|—_ノヘく/\\:;]$").unwrap();
-    static ref KANA_ONLY_REGEX: Regex = Regex::new(r"^[\p{Hiragana}\p{Katakana}]$").unwrap();
+    static ref KANJI_REGEX: Regex = Regex::new(r"\p{Han}").unwrap();
+    static ref KATAKANA_REGEX: Regex = Regex::new(r"[\p{Katakana}]").unwrap();
 }
 
 #[derive(Clone)]
@@ -23,7 +24,7 @@ impl Default for MergeConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            font_size_ratio: 1.5,
+            font_size_ratio: 3.0,
             add_space_on_merge: None,
         }
     }
@@ -107,14 +108,9 @@ fn filter_bad_boxes(lines: Vec<OcrResult>, page_w: u32, page_h: u32) -> Vec<OcrR
         let text_len = text.chars().count();
         let box_area = l.tight_bounding_box.width * l.tight_bounding_box.height;
 
-        // Rule A: Single Character Filtering
         if text_len == 1 {
             let ch = text.chars().next().unwrap();
             if ch.is_ascii_punctuation() || ch.is_ascii_digit() {
-                keep[i] = false;
-                continue;
-            }
-            if KANA_ONLY_REGEX.is_match(text) {
                 keep[i] = false;
                 continue;
             }
@@ -124,13 +120,13 @@ fn filter_bad_boxes(lines: Vec<OcrResult>, page_w: u32, page_h: u32) -> Vec<OcrR
             }
         }
 
-        // Rule B: Tiny Speck Filter (0.05%)
         if box_area < page_area * 0.0005 {
-            keep[i] = false;
-            continue;
+            if !JAPANESE_REGEX.is_match(text) {
+                keep[i] = false;
+                continue;
+            }
         }
 
-        // Rule C: Sound Effect (SFX) Filter
         if box_area > page_area * 0.30 && text_len < 6 {
             keep[i] = false;
             continue;
@@ -162,15 +158,22 @@ fn filter_bad_boxes(lines: Vec<OcrResult>, page_w: u32, page_h: u32) -> Vec<OcrR
                 let b_area = b.tight_bounding_box.width * b.tight_bounding_box.height;
 
                 if intersection_area > b_area * 0.3 {
-                    // Vertical > Horizontal
                     if a.forced_orientation.as_deref() == Some("vertical")
                         && b.forced_orientation.as_deref() == Some("horizontal")
                     {
-                        keep[j] = false;
-                        continue;
+                        if !JAPANESE_REGEX.is_match(&b.text) {
+                            keep[j] = false;
+                            continue;
+                        }
                     }
+
                     let a_area = a.tight_bounding_box.width * a.tight_bounding_box.height;
                     if a_area > b_area * 3.0 && intersection_area > b_area * 0.8 {
+                        if JAPANESE_REGEX.is_match(&b.text) {
+                            if !a.text.contains(&b.text) {
+                                continue;
+                            }
+                        }
                         keep[j] = false;
                         continue;
                     }
@@ -192,42 +195,48 @@ fn filter_bad_boxes(lines: Vec<OcrResult>, page_w: u32, page_h: u32) -> Vec<OcrR
             let main = &lines[i];
             let sub = &lines[j];
 
-            let main_font = if main.forced_orientation.as_deref() == Some("vertical") {
-                main.tight_bounding_box.width
-            } else {
-                main.tight_bounding_box.height
-            };
-            let sub_font = if sub.forced_orientation.as_deref() == Some("vertical") {
-                sub.tight_bounding_box.width
-            } else {
-                sub.tight_bounding_box.height
-            };
-
-            if sub_font > main_font * 0.55 {
+            if !KANJI_REGEX.is_match(&main.text) {
                 continue;
             }
 
-            let is_furigana = if main.forced_orientation.as_deref() == Some("vertical") {
-                let x_gap = sub.tight_bounding_box.x
-                    - (main.tight_bounding_box.x + main.tight_bounding_box.width);
-                let y_overlap = (main.tight_bounding_box.y + main.tight_bounding_box.height)
-                    .min(sub.tight_bounding_box.y + sub.tight_bounding_box.height)
-                    - main.tight_bounding_box.y.max(sub.tight_bounding_box.y);
-                x_gap > -main_font * 0.2
-                    && x_gap < main_font * 1.5
-                    && y_overlap > sub.tight_bounding_box.height * 0.5
-            } else {
-                let y_gap = main.tight_bounding_box.y
-                    - (sub.tight_bounding_box.y + sub.tight_bounding_box.height);
-                let x_overlap = (main.tight_bounding_box.x + main.tight_bounding_box.width)
-                    .min(sub.tight_bounding_box.x + sub.tight_bounding_box.width)
-                    - main.tight_bounding_box.x.max(sub.tight_bounding_box.x);
-                y_gap > -main_font * 0.2
-                    && y_gap < main_font * 1.5
-                    && x_overlap > sub.tight_bounding_box.width * 0.5
-            };
+            let main_thickness = main
+                .tight_bounding_box
+                .width
+                .min(main.tight_bounding_box.height);
+            let sub_thickness = sub
+                .tight_bounding_box
+                .width
+                .min(sub.tight_bounding_box.height);
 
-            if is_furigana {
+            if KANJI_REGEX.is_match(&sub.text) || KATAKANA_REGEX.is_match(&sub.text) {
+                continue;
+            }
+
+            if sub_thickness > main_thickness * 0.80 {
+                continue;
+            }
+
+            let proximity_limit = main_thickness * 0.5;
+
+            let x_gap_v = sub.tight_bounding_box.x
+                - (main.tight_bounding_box.x + main.tight_bounding_box.width);
+            let y_overlap_v = (main.tight_bounding_box.y + main.tight_bounding_box.height)
+                .min(sub.tight_bounding_box.y + sub.tight_bounding_box.height)
+                - main.tight_bounding_box.y.max(sub.tight_bounding_box.y);
+
+            let is_vertical_furigana =
+                x_gap_v > -main_thickness * 0.5 && x_gap_v < proximity_limit && y_overlap_v > 0.0;
+
+            let y_gap_h = main.tight_bounding_box.y
+                - (sub.tight_bounding_box.y + sub.tight_bounding_box.height);
+            let x_overlap_h = (main.tight_bounding_box.x + main.tight_bounding_box.width)
+                .min(sub.tight_bounding_box.x + sub.tight_bounding_box.width)
+                - main.tight_bounding_box.x.max(sub.tight_bounding_box.x);
+
+            let is_horizontal_furigana =
+                y_gap_h > -main_thickness * 0.5 && y_gap_h < proximity_limit && x_overlap_h > 0.0;
+
+            if is_vertical_furigana || is_horizontal_furigana {
                 keep[j] = false;
             }
         }
@@ -278,57 +287,83 @@ impl UnionFind {
 }
 
 fn are_lines_mergeable(a: &ProcessedLine, b: &ProcessedLine, config: &MergeConfig) -> bool {
-    // 1. Orientation check
     if a.is_vertical != b.is_vertical {
         return false;
     }
 
-    // 2. Font size check
     let max_font = a.font_size.max(b.font_size);
     let min_font = a.font_size.min(b.font_size);
-    if max_font / min_font > config.font_size_ratio {
+    let font_ratio = max_font / min_font;
+
+    if font_ratio > config.font_size_ratio {
         return false;
     }
 
-    // 3. Sidebar Protection
-    let overlap_main = 0.0f64.max(a.max_main.min(b.max_main) - a.min_main.max(b.min_main));
-    if overlap_main > 0.0 {
-        let max_len = a.length_main.max(b.length_main);
-        let min_len = a.length_main.min(b.length_main);
-        if max_len > min_len * 3.0 {
-            // Must be touching
-            let dist_cross = 0.0f64
-                .max(b.min_cross - a.max_cross)
-                .max(a.min_cross - b.max_cross);
-            if dist_cross > min_font * 0.2 {
-                return false;
-            }
-        }
+    let raw_overlap_main = a.max_main.min(b.max_main) - a.min_main.max(b.min_main);
+
+    // Panel/Vertical Continuity Check
+    if raw_overlap_main < -min_font * 0.5 {
+        return false;
     }
 
-    // 4. Dynamic Spacing with STRICT Limit
+    let overlap_main = 0.0f64.max(raw_overlap_main);
     let gap_cross = 0.0f64
         .max(b.min_cross - a.max_cross)
         .max(a.min_cross - b.max_cross);
-    let overlap_ratio = overlap_main / a.font_size.max(b.font_size);
 
     let base_metric = min_font;
+    let global_overlap = overlap_main / a.length_main.max(b.length_main);
 
-    // Hard Limit: Gap > 1.25x font size -> Separate
-    if gap_cross > base_metric * 1.25 {
+    // --- REFINED TIERED STRATEGY (INVERTED LOGIC) ---
+
+    // 1. TOUCHING: Merge anything that touches horizontally.
+    if gap_cross < base_metric * 0.2 {
+        return true;
+    }
+
+    let is_highly_similar = font_ratio < 1.25;
+    let mut allowed_gap: f64 = 0.0;
+
+    if is_highly_similar {
+        // TIER 2A: High Overlap (>80%) -> Wide Gap (2.0x)
+        if global_overlap > 0.8 {
+            allowed_gap = 2.0;
+        }
+        // TIER 2B: Medium Overlap (40%-80%) -> STRICT GAP (0.9x)
+        // [FIX] This forces Distinct Bubbles (Right Side) to split.
+        else if global_overlap > 0.4 {
+            allowed_gap = 0.9;
+        }
+        // TIER 2C: Low Overlap (<40%) -> LOOSE GAP (1.3x)
+        // [FIX] This allows Staggered Lines (Left Side) to merge.
+        else {
+            allowed_gap = 1.3;
+        }
+    } else {
+        // TIER 3: Dissimilar Fonts -> Strict
+        if global_overlap > 0.5 {
+            allowed_gap = 0.8;
+        }
+    }
+
+    // Sidebar Protection
+    let len_ratio = a.length_main.max(b.length_main) / a.length_main.min(b.length_main);
+    if len_ratio > 2.5 {
+        allowed_gap = allowed_gap.min(0.8);
+    }
+
+    // Font Consistency Check
+    if gap_cross > base_metric * 1.2 {
+        if font_ratio > 1.15 {
+            return false;
+        }
+    }
+
+    if gap_cross > base_metric * allowed_gap {
         return false;
     }
 
-    let mut allowed_gap_ratio = 0.8;
-    if overlap_ratio > 0.5 {
-        allowed_gap_ratio += 0.3;
-    }
-
-    if gap_cross > base_metric * allowed_gap_ratio {
-        return false;
-    }
-
-    // 5. Main Axis Proximity
+    // Main Axis Proximity
     if overlap_main <= 0.0 {
         let gap_main = 0.0f64
             .max(b.min_main - a.max_main)
@@ -346,23 +381,27 @@ pub fn auto_merge(lines: Vec<OcrResult>, w: u32, h: u32, config: &MergeConfig) -
         return lines;
     }
 
-    // 1. Filter Noise
     let clean_lines = filter_bad_boxes(lines, w, h);
 
     let processed: Vec<ProcessedLine> = clean_lines
         .iter()
         .map(|l| {
             let b = &l.tight_bounding_box;
-
-            // --- NEW ORIENTATION LOGIC ---
-            // If text is NOT Japanese, it MUST be horizontal.
             let is_japanese = JAPANESE_REGEX.is_match(&l.text);
+            let char_count = l.text.chars().count();
 
-            let lens_is_vertical = l.forced_orientation.as_deref() == Some("vertical");
-
-            // Final decision: Vertical only if it is Japanese AND Lens thinks it's vertical.
-            // English/Korean/Numbers forced to Horizontal.
-            let is_v = is_japanese && lens_is_vertical;
+            let is_v = if is_japanese {
+                if char_count == 1 {
+                    b.height > b.width * 0.8
+                } else {
+                    let lens_is_vertical = l.forced_orientation.as_deref() == Some("vertical");
+                    let is_physically_vertical = b.height > b.width;
+                    lens_is_vertical || is_physically_vertical
+                }
+            } else {
+                let lens_is_vertical = l.forced_orientation.as_deref() == Some("vertical");
+                lens_is_vertical && b.height > b.width * 1.1
+            };
 
             let (min_main, max_main, min_cross, max_cross) = if is_v {
                 (b.y, b.y + b.height, b.x, b.x + b.width)
@@ -382,7 +421,6 @@ pub fn auto_merge(lines: Vec<OcrResult>, w: u32, h: u32, config: &MergeConfig) -
         })
         .collect();
 
-    // 2. Cluster
     let mut uf = UnionFind::new(processed.len());
     for i in 0..processed.len() {
         for j in (i + 1)..processed.len() {
@@ -392,7 +430,6 @@ pub fn auto_merge(lines: Vec<OcrResult>, w: u32, h: u32, config: &MergeConfig) -
         }
     }
 
-    // 3. Groups
     let mut groups: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
     for i in 0..processed.len() {
         groups.entry(uf.find(i)).or_default().push(i);
@@ -405,7 +442,6 @@ pub fn auto_merge(lines: Vec<OcrResult>, w: u32, h: u32, config: &MergeConfig) -
         }
 
         if indices.len() == 1 {
-            // Update orientation based on our forced logic
             let mut line = clean_lines[indices[0]].clone();
             let is_v = processed[indices[0]].is_vertical;
             line.forced_orientation = Some(if is_v {
@@ -418,8 +454,6 @@ pub fn auto_merge(lines: Vec<OcrResult>, w: u32, h: u32, config: &MergeConfig) -
         }
 
         let mut group_lines: Vec<&OcrResult> = indices.iter().map(|&i| &clean_lines[i]).collect();
-
-        // Determine group orientation from first item (they should all match due to merge logic)
         let is_vertical = processed[indices[0]].is_vertical;
 
         group_lines.sort_by(|a, b| {
@@ -442,7 +476,6 @@ pub fn auto_merge(lines: Vec<OcrResult>, w: u32, h: u32, config: &MergeConfig) -
             }
         });
 
-        // Smart Joining
         let use_space_separator = if let Some(forced) = config.add_space_on_merge {
             forced
         } else {
@@ -455,16 +488,13 @@ pub fn auto_merge(lines: Vec<OcrResult>, w: u32, h: u32, config: &MergeConfig) -
         };
 
         let mut text_content = String::new();
-
         for (i, line) in group_lines.iter().enumerate() {
             if i == 0 {
                 text_content.push_str(&line.text);
                 continue;
             }
-
             let prev = &group_lines[i - 1];
             let curr = line;
-
             let is_new_line = if is_vertical {
                 let p_x2 = prev.tight_bounding_box.x + prev.tight_bounding_box.width;
                 let c_x1 = curr.tight_bounding_box.x;
@@ -509,6 +539,5 @@ pub fn auto_merge(lines: Vec<OcrResult>, w: u32, h: u32, config: &MergeConfig) -
             }),
         });
     }
-
     results
 }
