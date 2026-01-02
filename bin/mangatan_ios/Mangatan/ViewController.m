@@ -18,6 +18,7 @@
     // 1. Setup WebView (Hidden initially)
     self.webView = [[WKWebView alloc] initWithFrame:self.view.bounds];
     self.webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.webView.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     self.webView.alpha = 0.0;
     [self.view addSubview:self.webView];
 
