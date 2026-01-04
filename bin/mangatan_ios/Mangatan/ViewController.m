@@ -98,4 +98,25 @@
     }
 }
 
+// --- NEW: Force the UI to reset from scratch ---
+- (void)forceReload {
+    NSLog(@"[UI] Force reload triggered. Resetting webview state.");
+    
+    // 1. Immediately hide the broken/stale webview
+    [UIView animateWithDuration:0.2 animations:^{
+        self.loadingView.alpha = 1.0;
+        self.webView.alpha = 0.0;
+    }];
+    
+    // 2. Mark app as "Not Ready" so the timer knows to re-check and re-load
+    self.wasReady = NO;
+    
+    // 3. Navigate to blank to kill any stale sockets or JS loops
+    [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"about:blank"]]];
+    
+    // On the next timer tick (1s later), checkServerStatus will run:
+    // - If server is alive: It loads http://127.0.0.1:4568 immediately.
+    // - If server is dead: It keeps the loading screen up while the server restarts.
+}
+
 @end
