@@ -1,4 +1,13 @@
 # Mangatan
+<div align="center">
+
+[![Github All Releases](https://img.shields.io/github/downloads/kolbyml/mangatan/total.svg)](https://github.com/kolbyml/mangatan/releases)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/kolbyml)](https://github.com/sponsors/kolbyml)
+[![Static Badge](https://img.shields.io/badge/donate-ko--fi-ed6760?label=donate)](https://ko-fi.com/kolbyml)
+[![GitHub License](https://img.shields.io/github/license/kolbyml/mangatan)](https://github.com/kolbyml/mangatan?tab=MIT-1-ov-file)
+[![Discord](https://img.shields.io/discord/1448140648950530182?color=%237785cc)](https://discord.gg/tDAtpPN8KK)
+
+</div>
 
 **The easiest way to read manga with instant OCR lookup.** *No scripts, no complex setup—just download and read.*
 
