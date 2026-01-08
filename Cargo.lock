@@ -3609,7 +3609,6 @@ dependencies = [
  "futures",
  "futures-util",
  "image",
- "mangatan-anki-server",
  "mangatan-ocr-server",
  "mangatan-yomitan-server",
  "mime_guess",
@@ -3626,17 +3625,6 @@ dependencies = [
  "vergen",
  "vergen-git2",
  "zip 6.0.0",
-]
-
-[[package]]
-name = "mangatan-anki-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64",
- "reqwest",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -3701,7 +3689,6 @@ dependencies = [
  "lazy_static",
  "libc",
  "libloading 0.8.9",
- "mangatan-anki-server",
  "mangatan-ocr-server",
  "mangatan-yomitan-server",
  "mime_guess",
