@@ -1,6 +1,3 @@
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -9,6 +6,10 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 use wordbase_api::{DictionaryId, Record};
 

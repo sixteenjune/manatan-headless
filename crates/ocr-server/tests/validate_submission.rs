@@ -1,8 +1,7 @@
+use std::{collections::HashMap, fs, path::Path};
+
 use mangatan_ocr_server::logic::{self, RawChunk};
 use serde_json::Value;
-use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 use walkdir::WalkDir;
 
 /// Validates that `source` contains enough of every character in `target`
@@ -99,7 +98,7 @@ async fn validate_expected_is_subset_of_raw() {
                 } else {
                     println!("   -> Generating raw data from image...");
                     let image_bytes = fs::read(path).expect("Failed to read image");
-                    logic::get_raw_ocr_data(&image_bytes)
+                    logic::get_raw_ocr_data(&image_bytes, None, None)
                         .await
                         .expect("Failed to perform OCR extraction")
                 };

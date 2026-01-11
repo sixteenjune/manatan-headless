@@ -13,9 +13,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "embed-jre")]
-use crate::io::extract_zip;
-use crate::io::{extract_file, resolve_java};
 use anyhow::anyhow;
 use axum::{
     Router,
@@ -55,6 +52,10 @@ use tokio_tungstenite::{
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
+
+#[cfg(feature = "embed-jre")]
+use crate::io::extract_zip;
+use crate::io::{extract_file, resolve_java};
 
 const APP_VERSION: &str = env!("MANGATAN_VERSION");
 

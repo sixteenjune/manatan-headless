@@ -1,14 +1,18 @@
-use crate::state::{AppState, StoredRecord};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
 use lindera::{
     dictionary::{DictionaryKind, load_dictionary_from_kind},
     mode::Mode,
     segmenter::Segmenter,
     tokenizer::Tokenizer,
 };
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tracing::{error, info};
 use wordbase_api::{DictionaryId, FrequencyValue, Record, RecordEntry, RecordId, Span, Term};
+
+use crate::state::{AppState, StoredRecord};
 
 pub struct LookupService {
     tokenizer: Arc<Tokenizer>,

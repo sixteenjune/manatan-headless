@@ -1,9 +1,11 @@
-use mangatan_ocr_server::logic::{self, RawChunk};
-use mangatan_ocr_server::merge::{self, MergeConfig};
+use std::{fs, path::PathBuf};
+
+use mangatan_ocr_server::{
+    logic::{self, RawChunk},
+    merge::{self, MergeConfig},
+};
 use pretty_assertions::StrComparison;
 use serde_json::Value;
-use std::fs;
-use std::path::PathBuf;
 use walkdir::WalkDir;
 
 fn sanitize_results(v: &mut Value) {
@@ -91,7 +93,8 @@ async fn run_merge_regression_tests() {
                 let raw_cache_path = path.with_extension("raw.json");
                 let expected_path = path.with_extension("expected.json");
 
-                // Optimization: Skip processing if we only want new files and raw regen is NOT requested
+                // Optimization: Skip processing if we only want new files and raw regen is NOT
+                // requested
                 if only_generate_missing
                     && expected_path.exists()
                     && !update_expected
@@ -108,7 +111,7 @@ async fn run_merge_regression_tests() {
                 } else {
                     println!("  [OCR] Running Lens OCR for {}...", test_name);
                     let image_bytes = fs::read(path).expect("Read image");
-                    let chunks = logic::get_raw_ocr_data(&image_bytes)
+                    let chunks = logic::get_raw_ocr_data(&image_bytes, None, None)
                         .await
                         .expect("Lens OCR failed");
 

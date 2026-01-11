@@ -114,19 +114,19 @@ struct ProxySettingsData {
 struct ProxySettings {
     #[serde(rename = "socksProxyEnabled")]
     socks_proxy_enabled: bool,
-    
+
     #[serde(rename = "socksProxyVersion")]
     socks_proxy_version: i32,
-    
+
     #[serde(rename = "socksProxyHost")]
     socks_proxy_host: String,
-    
+
     #[serde(rename = "socksProxyPort")]
     socks_proxy_port: String,
-    
+
     #[serde(rename = "socksProxyUsername")]
     socks_proxy_username: Option<String>,
-    
+
     #[serde(rename = "socksProxyPassword")]
     socks_proxy_password: Option<String>,
 }
@@ -181,9 +181,7 @@ async fn get_proxy_settings(
         .await
         .map_err(|err| anyhow!("Error decoding proxy settings GraphQL response: {err}"))?;
 
-    let proxy_settings = json_response
-        .data
-        .and_then(|data| data.settings);
+    let proxy_settings = json_response.data.and_then(|data| data.settings);
 
     Ok(proxy_settings)
 }
@@ -425,14 +423,17 @@ pub async fn get_raw_ocr_data(
     let mut raw_chunks = Vec::new();
 
     // Fetch proxy settings
-    let proxy_settings = get_proxy_settings(user.clone(), pass.clone()).await.ok().flatten();
-    
+    let proxy_settings = get_proxy_settings(user.clone(), pass.clone())
+        .await
+        .ok()
+        .flatten();
+
     // Create LensClient with optional proxy
     let lens_client = if let Some(ref proxy) = proxy_settings {
         if proxy.socks_proxy_enabled && !proxy.socks_proxy_host.is_empty() {
             // Build proxy URL with authentication if provided
-            let proxy_url = if let (Some(username), Some(password)) = 
-                (&proxy.socks_proxy_username, &proxy.socks_proxy_password) 
+            let proxy_url = if let (Some(username), Some(password)) =
+                (&proxy.socks_proxy_username, &proxy.socks_proxy_password)
             {
                 if !username.is_empty() && !password.is_empty() {
                     format!(
@@ -446,26 +447,23 @@ pub async fn get_raw_ocr_data(
                 } else {
                     format!(
                         "socks{}://{}:{}",
-                        proxy.socks_proxy_version,
-                        proxy.socks_proxy_host,
-                        proxy.socks_proxy_port
+                        proxy.socks_proxy_version, proxy.socks_proxy_host, proxy.socks_proxy_port
                     )
                 }
             } else {
                 format!(
                     "socks{}://{}:{}",
-                    proxy.socks_proxy_version,
-                    proxy.socks_proxy_host,
-                    proxy.socks_proxy_port
+                    proxy.socks_proxy_version, proxy.socks_proxy_host, proxy.socks_proxy_port
                 )
             };
-            
-            tracing::info!("Using SOCKS{} proxy for Google Lens: {}:{}",
+
+            tracing::info!(
+                "Using SOCKS{} proxy for Google Lens: {}:{}",
                 proxy.socks_proxy_version,
                 proxy.socks_proxy_host,
                 proxy.socks_proxy_port
             );
-            
+
             LensClient::new_with_proxy(None, Some(&proxy_url))
                 .map_err(|e| anyhow!("Failed to create LensClient with proxy: {}", e))?
         } else {

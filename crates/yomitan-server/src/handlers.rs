@@ -1,4 +1,3 @@
-use crate::{PREBAKED_DICT, ServerState, import};
 use axum::{
     Json,
     extract::{Multipart, Query, State},
@@ -8,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, Value as JsonValue, json};
 use tracing::{error, info};
 use wordbase_api::{DictionaryId, Record, Term};
+
+use crate::{PREBAKED_DICT, ServerState, import};
 
 #[derive(Deserialize)]
 pub struct LookupParams {

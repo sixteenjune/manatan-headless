@@ -1,13 +1,15 @@
-use crate::state::{AppState, DictionaryData, StoredRecord};
+use std::io::Read;
+
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::io::Read;
 use tracing::info;
 use wordbase_api::{
     DictionaryId, DictionaryKind, DictionaryMeta, Record,
     dict::yomitan::{Glossary, structured},
 };
 use zip::ZipArchive;
+
+use crate::state::{AppState, DictionaryData, StoredRecord};
 
 pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
     info!(
