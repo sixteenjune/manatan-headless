@@ -230,10 +230,11 @@ impl eframe::App for MangatanApp {
                 self.webview_launched = true;
             }
 
-            // Render a clean Loading Screen (No logs, no buttons)
+            // Render a Loading Screen WITH LOGS
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(ctx.screen_rect().height() * 0.4);
+                    // Reduce top spacing slightly to fit logs
+                    ui.add_space(ctx.screen_rect().height() * 0.1);
 
                     if !is_ready {
                         ui.spinner();
@@ -241,7 +242,7 @@ impl eframe::App for MangatanApp {
                         ui.heading("Mangatan is starting...");
                         ui.label("Please wait while the server initializes.");
                     } else {
-                        // Minimal UI in case user backs out of WebView
+                        // UI in case user backs out of WebView
                         ui.heading("Mangatan is Running");
                         ui.add_space(20.0);
                         if ui.button("Return to App").clicked() {
@@ -249,8 +250,33 @@ impl eframe::App for MangatanApp {
                         }
                     }
                 });
+
+                // --- ADDED LOG DISPLAY HERE ---
+                ui.add_space(20.0);
+                ui.separator();
+                ui.heading("Logs");
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+                        if let Some(style) = ui
+                            .style_mut()
+                            .text_styles
+                            .get_mut(&egui::TextStyle::Monospace)
+                        {
+                            style.size = 10.0;
+                        }
+
+                        if let Ok(logs) = LOG_BUFFER.lock() {
+                            for line in logs.iter() {
+                                ui.label(line);
+                            }
+                        }
+                    });
             });
-            return; // Skip drawing the debug GUI
+            return; // Skip drawing the standard debug GUI
         }
 
         // --- DEBUG GUI (Only runs if feature is DISABLED) ---
