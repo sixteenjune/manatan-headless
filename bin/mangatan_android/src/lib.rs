@@ -942,6 +942,7 @@ fn start_background_services(app: AndroidApp, files_dir: PathBuf) {
         options_vec.push("-Xms256m".to_string());
         options_vec.push("-XX:TieredStopAtLevel=1".to_string());
         options_vec.push("-Dsuwayomi.tachidesk.config.server.webUIChannel=BUNDLED".to_string());
+        options_vec.push("-Dsuwayomi.tachidesk.config.server.kcefEnable=false".to_string());
         options_vec.push(
             "-Dsuwayomi.tachidesk.config.server.initialOpenInBrowserEnabled=false".to_string(),
         );
