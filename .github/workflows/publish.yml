@@ -458,7 +458,7 @@ jobs:
           name: mangatan-android
           path: signed_apks/*.apk
 
-  # --- JOB 6: Build iOS IPA ---
+  # --- JOB 6: Build iOS IPA & Upload ---
   build_ios:
     name: Build iOS IPA
     needs: [prepare_version, build_webui]
@@ -487,8 +487,55 @@ jobs:
           cache: 'yarn'
           cache-dependency-path: 'Mangatan-WebUI/yarn.lock'
 
+      # --- NEW: Install Signing Certificates & Profile ---
+      - name: Install Apple Certificates and Profiles
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.IOS_BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: "temporary_password"
+        run: |
+          # Create Keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import Certificate
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o certificate.p12
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Install Profile & Capture UUID
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o profile.mobileprovision
+          
+          # Get the UUID from the profile content
+          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i profile.mobileprovision))
+          
+          # Copy it to the correct location
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
+          
+          # Save UUID to Environment Variable for the next step
+          echo "PROFILE_UUID=$UUID" >> $GITHUB_ENV
+          
+          security list-keychains -s $KEYCHAIN_PATH
+
       - name: Patch Xcode Project
         run: find bin/mangatan_ios -name "project.pbxproj" -exec sed -i '' 's/unset SDKROOT/# unset SDKROOT/g' {} +
+
+      - name: Update Xcode Marketing Version
+        run: |
+          CLEAN_VERSION="${{ needs.prepare_version.outputs.clean_version }}"
+          PBXPROJ="bin/mangatan_ios/Mangatan.xcodeproj/project.pbxproj"
+          
+          echo "Updating MARKETING_VERSION to $CLEAN_VERSION in $PBXPROJ..."
+          
+          # Use sed to replace the existing version with the clean version
+          sed -i '' "s/MARKETING_VERSION = .*;/MARKETING_VERSION = $CLEAN_VERSION;/g" "$PBXPROJ"
+          
+          # Verify the change in the logs
+          grep "MARKETING_VERSION" "$PBXPROJ"
 
       - name: Download WebUI Assets
         uses: actions/download-artifact@v4
@@ -498,9 +545,6 @@ jobs:
 
       - name: Disable Xcode WebUI Build
         run: |
-          # We overwrite the 'ios_webui' target in the Makefile to do nothing.
-          # This prevents Xcode from trying to 'yarn install' (which fails) or deleting the files we just downloaded.
-          # We use printf because 'echo -e' is not reliable on macOS.
           printf "\nios_webui:\n\t@echo 'Skipping WebUI build (handled by CI)'\n" >> Makefile
 
       - name: Prepare iOS Assets
@@ -515,33 +559,76 @@ jobs:
           cd bin/mangatan_ios/backend
           cargo build --release --target aarch64-apple-ios
 
-      - name: Build IPA
+      # --- CHANGED: Build Archive (Signed) ---
+      - name: Archive App
         run: |
           cd bin/mangatan_ios
-          xcodebuild -scheme Mangatan -destination "generic/platform=iOS" -archivePath Mangatan.xcarchive archive CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+          xcodebuild -scheme Mangatan \
+            -destination "generic/platform=iOS" \
+            -archivePath Mangatan.xcarchive \
+            archive \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM="4842UP28SQ" \
+            PROVISIONING_PROFILE="${{ env.PROFILE_UUID }}"
+
+      # --- NEW: Export IPA (Standard Format) ---
+      - name: Export Signed IPA
+        run: |
+          cd bin/mangatan_ios
           
+          # Create ExportOptions.plist for App Store
           cat > ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>method</key>
-              <string>development</string>
+              <string>app-store-connect</string>
+              <key>uploadBitcode</key>
+              <false/>
+              <key>compileBitcode</key>
+              <false/>
               <key>signingStyle</key>
               <string>manual</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>app.mangatan.mangatan</key>
+                  <string>Mangatan App Store CI</string>
+              </dict>
           </dict>
           </plist>
           EOF
           
-          mkdir -p Payload
-          cp -r Mangatan.xcarchive/Products/Applications/Mangatan.app Payload/
-          zip -r Mangatan.ipa Payload
+          xcodebuild -exportArchive \
+            -archivePath Mangatan.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath output \
+            -allowProvisioningUpdates
+
+      # --- NEW: Upload to App Store Connect ---
+      - name: Upload to App Store Connect
+        env:
+          API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+        run: |
+          # Create the private key file expected by altool
+          mkdir -p ~/.private_keys
+          echo "$API_PRIVATE_KEY" > ~/.private_keys/AuthKey_$API_KEY_ID.p8
           
+          echo "Uploading IPA..."
+          xcrun altool --upload-app \
+            --type ios \
+            --file bin/mangatan_ios/output/Mangatan.ipa \
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$ISSUER_ID"
+
       - name: Upload iOS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: mangatan-ios
-          path: bin/mangatan_ios/Mangatan.ipa
+          path: bin/mangatan_ios/output/Mangatan.ipa
 
   # --- JOB 7: Release ---
   release:
