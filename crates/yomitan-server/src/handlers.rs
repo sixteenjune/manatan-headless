@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, Value as JsonValue, json};
 use tracing::{error, info};
-use wordbase_api::{DictionaryId, Record, Term};
+use wordbase_api::{DictionaryId, Record, Term, dict::yomitan::GlossaryTag};
 
 use crate::{PREBAKED_DICT, ServerState, import};
 
@@ -49,6 +49,7 @@ pub struct ApiGroupedResult {
     pub definitions: Vec<ApiDefinition>,
     pub frequencies: Vec<ApiFrequency>,
     pub forms: Vec<ApiForm>,
+    pub term_tags: Vec<GlossaryTag>,
     // ADDED: Return the length of the match so the frontend can highlight it
     pub match_len: usize,
 }
@@ -239,6 +240,7 @@ pub async fn lookup_handler(
     struct Aggregator {
         headword: String,
         reading: String,
+        term_tags: Vec<GlossaryTag>,
         furigana: Vec<(String, String)>,
         definitions: Vec<ApiDefinition>,
         frequencies: Vec<ApiFrequency>,
@@ -251,7 +253,7 @@ pub async fn lookup_handler(
     let mut flat_results: Vec<ApiGroupedResult> = Vec::new();
 
     for entry in raw_results {
-        let (headword, reading) = match &entry.term {
+        let (headword, reading) = match &entry.0.term {
             Term::Full(h, r) => (h.to_string(), r.to_string()),
             Term::Headword(h) => (h.to_string(), "".to_string()),
             Term::Reading(r) => (r.to_string(), "".to_string()),
@@ -261,11 +263,11 @@ pub async fn lookup_handler(
             continue;
         }
 
-        let match_len = entry.span_chars.end as usize;
+        let match_len = entry.0.span_chars.end as usize;
 
         let mut is_freq = false;
 
-        let (content_val, tags) = if let Record::YomitanGlossary(gloss) = &entry.record {
+        let (content_val, tags) = if let Record::YomitanGlossary(gloss) = &entry.0.record {
             use wordbase_api::dict::yomitan::structured::Content;
             if let Some(Content::String(s)) = gloss.content.first() {
                 is_freq = s.starts_with("Frequency: ");
@@ -274,11 +276,11 @@ pub async fn lookup_handler(
             let t: Vec<String> = gloss.tags.iter().map(|tag| tag.name.clone()).collect();
             (json!(gloss.content), t)
         } else {
-            (json!(entry.record), vec![])
+            (json!(entry.0.record), vec![])
         };
 
         let dict_name = dict_meta
-            .get(&entry.source)
+            .get(&entry.0.source)
             .cloned()
             .unwrap_or("Unknown".to_string());
 
@@ -314,6 +316,7 @@ pub async fn lookup_handler(
                         reading: reading.clone(),
                         furigana: calculate_furigana(&headword, &reading),
                         definitions: vec![],
+                        term_tags: vec![],
                         frequencies: vec![freq_obj],
                         forms_set: vec![(headword.clone(), reading.clone())],
                         match_len,
@@ -326,6 +329,7 @@ pub async fn lookup_handler(
                     furigana: calculate_furigana(&headword, &reading),
                     definitions: vec![],
                     frequencies: vec![freq_obj],
+                    term_tags: vec![],
                     forms: vec![ApiForm {
                         headword: headword.clone(),
                         reading: reading.clone(),
@@ -358,6 +362,7 @@ pub async fn lookup_handler(
                         furigana: calculate_furigana(&headword, &reading),
                         definitions: vec![def_obj],
                         frequencies: vec![],
+                        term_tags: entry.1.unwrap_or_default(),
                         forms_set: vec![(headword.clone(), reading.clone())],
                         match_len,
                     });
@@ -369,6 +374,7 @@ pub async fn lookup_handler(
                     furigana: calculate_furigana(&headword, &reading),
                     definitions: vec![def_obj],
                     frequencies: vec![],
+                    term_tags: entry.1.unwrap_or_default(),
                     forms: vec![ApiForm {
                         headword: headword.clone(),
                         reading: reading.clone(),
@@ -388,6 +394,7 @@ pub async fn lookup_handler(
                     furigana: agg.furigana,
                     definitions: agg.definitions,
                     frequencies: agg.frequencies,
+                    term_tags: agg.term_tags,
                     forms: agg
                         .forms_set
                         .into_iter()

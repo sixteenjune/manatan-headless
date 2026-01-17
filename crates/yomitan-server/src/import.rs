@@ -1,7 +1,7 @@
-use std::io::Read;
-use std::collections::{HashSet, HashMap};
 use anyhow::Result;
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use tracing::info;
 use wordbase_api::{
     DictionaryId, DictionaryKind, DictionaryMeta, Record,
@@ -89,7 +89,6 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
     let mut encoder = snap::raw::Encoder::new();
 
     for name in &file_names {
-        
         // === BRANCH 1: Standard Definitions (term_bank) ===
         if name.contains("term_bank") && !name.contains("term_meta") && name.ends_with(".json") {
             info!("   -> Processing Definitions: {}", name);
@@ -106,35 +105,41 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
             for entry in bank {
                 if let Some(arr) = entry.as_array() {
                     // Min items 8 per schema
-                    if arr.len() < 8 { continue; }
+                    if arr.len() < 8 {
+                        continue;
+                    }
 
                     let headword = arr.get(0).and_then(|v| v.as_str()).unwrap_or("");
                     let reading = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
 
-                    if headword.is_empty() { continue; }
+                    if headword.is_empty() {
+                        continue;
+                    }
 
                     // --- Tags Parsing (Indices 2 and 7 are string of space-separated tags) ---
-                    let mut tags_vec = Vec::new();
+                    let mut definition_tags = Vec::new();
+                    let mut term_tags = Vec::new();
                     let mut seen_tags = HashSet::new();
 
-                    let parse_tags = |idx: usize, tags: &mut Vec<GlossaryTag>, seen: &mut HashSet<String>| {
-                        if let Some(tag_str) = arr.get(idx).and_then(|v| v.as_str()) {
-                            for t in tag_str.split_whitespace() {
-                                if !t.is_empty() && seen.insert(t.to_string()) {
-                                    // Treat as string, wrap for API compatibility
-                                    tags.push(GlossaryTag {
-                                        name: t.to_string(),
-                                        category: String::new(),
-                                        description: String::new(),
-                                        order: 0,
-                                    });
+                    let parse_tags =
+                        |idx: usize, tags: &mut Vec<GlossaryTag>, seen: &mut HashSet<String>| {
+                            if let Some(tag_str) = arr.get(idx).and_then(|v| v.as_str()) {
+                                for t in tag_str.split_whitespace() {
+                                    if !t.is_empty() && seen.insert(t.to_string()) {
+                                        // Treat as string, wrap for API compatibility
+                                        tags.push(GlossaryTag {
+                                            name: t.to_string(),
+                                            category: String::new(),
+                                            description: String::new(),
+                                            order: 0,
+                                        });
+                                    }
                                 }
                             }
-                        }
-                    };
+                        };
 
-                    parse_tags(2, &mut tags_vec, &mut seen_tags); // Definition tags
-                    parse_tags(7, &mut tags_vec, &mut seen_tags); // Term tags
+                    parse_tags(2, &mut definition_tags, &mut seen_tags); // Definition tags
+                    parse_tags(7, &mut term_tags, &mut seen_tags); // Term tags
 
                     // --- Content (Index 5) ---
                     let mut content_list = Vec::new();
@@ -151,7 +156,7 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
 
                     let record = Record::YomitanGlossary(Glossary {
                         popularity: arr.get(4).and_then(|v| v.as_i64()).unwrap_or(0),
-                        tags: tags_vec,
+                        tags: definition_tags,
                         content: content_list,
                     });
 
@@ -161,9 +166,16 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                         None
                     };
 
+                    let term_tags = if term_tags.is_empty() {
+                        None
+                    } else {
+                        Some(term_tags)
+                    };
+
                     let stored = StoredRecord {
                         dictionary_id: dict_id,
                         record,
+                        term_tags,
                         reading: stored_reading.clone(),
                     };
 
@@ -182,7 +194,6 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                 }
             }
         }
-        
         // === BRANCH 2: Metadata / Frequencies (term_meta_bank) ===
         else if name.contains("term_meta_bank") && name.ends_with(".json") {
             info!("   -> Processing Metadata: {}", name);
@@ -191,9 +202,10 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
             file.read_to_string(&mut s)?;
 
             let bank: Vec<Value> = serde_json::from_str(&s).unwrap_or_default();
-            
+
             // PREPARE STATEMENT LOCALLY FOR THIS BATCH
-            let mut stmt = tx.prepare("INSERT INTO terms (term, dictionary_id, json) VALUES (?, ?, ?)")?;
+            let mut stmt =
+                tx.prepare("INSERT INTO terms (term, dictionary_id, json) VALUES (?, ?, ?)")?;
 
             struct MetaEntry {
                 reading: Option<String>,
@@ -203,13 +215,17 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
 
             for entry in bank {
                 if let Some(arr) = entry.as_array() {
-                    if arr.len() < 3 { continue; }
-                    
+                    if arr.len() < 3 {
+                        continue;
+                    }
+
                     let term = arr.get(0).and_then(|v| v.as_str()).unwrap_or("");
                     let mode = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
                     let data_blob = arr.get(2).unwrap();
 
-                    if term.is_empty() { continue; }
+                    if term.is_empty() {
+                        continue;
+                    }
 
                     if mode == "freq" {
                         let mut display_val = String::new();
@@ -220,12 +236,14 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                             if let Some(r) = obj.get("reading").and_then(|v| v.as_str()) {
                                 specific_reading = Some(r.to_string());
                             }
-                            
+
                             // Frequency object might be nested or direct
                             let freq_data = obj.get("frequency").unwrap_or(data_blob);
-                            
+
                             if let Some(freq_obj) = freq_data.as_object() {
-                                if let Some(dv) = freq_obj.get("displayValue").and_then(|v| v.as_str()) {
+                                if let Some(dv) =
+                                    freq_obj.get("displayValue").and_then(|v| v.as_str())
+                                {
                                     display_val = dv.to_string();
                                 } else if let Some(v) = freq_obj.get("value") {
                                     display_val = v.to_string();
@@ -235,7 +253,7 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                             } else if let Some(s) = freq_data.as_str() {
                                 display_val = s.to_string();
                             }
-                        } 
+                        }
                         // Case 2: Primitive (just the value)
                         else if let Some(s) = data_blob.as_str() {
                             display_val = s.to_string();
@@ -247,20 +265,24 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                             display_val = data_blob.to_string();
                         }
 
-                        file_freq_map.entry(term.to_string()).or_default().push(MetaEntry {
-                            reading: specific_reading,
-                            value: display_val
-                        });
+                        file_freq_map
+                            .entry(term.to_string())
+                            .or_default()
+                            .push(MetaEntry {
+                                reading: specific_reading,
+                                value: display_val,
+                            });
                     }
                 }
             }
 
             // Insert Frequencies
             for (term, entries) in file_freq_map {
-                let general_value = entries.iter()
+                let general_value = entries
+                    .iter()
                     .find(|e| e.reading.is_none())
                     .map(|e| e.value.clone());
-                
+
                 for entry in &entries {
                     // Deduplication logic
                     if let Some(read) = &entry.reading {
@@ -290,6 +312,7 @@ pub fn import_zip(state: &AppState, data: &[u8]) -> Result<String> {
                     let stored = StoredRecord {
                         dictionary_id: dict_id,
                         record,
+                        term_tags: None,
                         reading: entry.reading.clone(),
                     };
 

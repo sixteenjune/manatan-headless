@@ -11,7 +11,7 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use wordbase_api::{DictionaryId, Record};
+use wordbase_api::{DictionaryId, Record, dict::yomitan::GlossaryTag};
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
@@ -36,6 +36,7 @@ pub struct AppState {
 pub struct StoredRecord {
     pub dictionary_id: DictionaryId,
     pub record: Record,
+    pub term_tags: Option<Vec<GlossaryTag>>,
     pub reading: Option<String>,
 }
 

@@ -10,7 +10,10 @@ use lindera::{
     tokenizer::Tokenizer,
 };
 use tracing::{error, info};
-use wordbase_api::{DictionaryId, FrequencyValue, Record, RecordEntry, RecordId, Span, Term};
+use wordbase_api::{
+    DictionaryId, FrequencyValue, Record, RecordEntry, RecordId, Span, Term,
+    dict::yomitan::GlossaryTag,
+};
 
 use crate::state::{AppState, StoredRecord};
 
@@ -49,7 +52,12 @@ impl LookupService {
         }
     }
 
-    pub fn search(&self, state: &AppState, text: &str, cursor_offset: usize) -> Vec<RecordEntry> {
+    pub fn search(
+        &self,
+        state: &AppState,
+        text: &str,
+        cursor_offset: usize,
+    ) -> Vec<(RecordEntry, Option<Vec<GlossaryTag>>)> {
         let mut results = Vec::new();
         let mut processed_candidates = HashSet::new();
 
@@ -147,22 +155,27 @@ impl LookupService {
                                         freq = g.popularity;
                                     }
 
-                                    results.push(RecordEntry {
-                                        span_bytes: Span {
-                                            start: 0,
-                                            end: candidate.word.len() as u64,
+                                    results.push((
+                                        RecordEntry {
+                                            span_bytes: Span {
+                                                start: 0,
+                                                end: candidate.word.len() as u64,
+                                            },
+                                            span_chars: Span {
+                                                start: 0,
+                                                end: match_len as u64,
+                                            },
+                                            source: stored.dictionary_id,
+                                            term: term_obj,
+                                            record_id: RecordId(0),
+                                            record: stored.record.clone(),
+                                            profile_sorting_frequency: None,
+                                            source_sorting_frequency: Some(FrequencyValue::Rank(
+                                                freq,
+                                            )),
                                         },
-                                        span_chars: Span {
-                                            start: 0,
-                                            end: match_len as u64,
-                                        },
-                                        source: stored.dictionary_id,
-                                        term: term_obj,
-                                        record_id: RecordId(0),
-                                        record: stored.record.clone(),
-                                        profile_sorting_frequency: None,
-                                        source_sorting_frequency: Some(FrequencyValue::Rank(freq)),
-                                    });
+                                        stored.term_tags,
+                                    ));
                                 }
                             }
                         }
@@ -172,13 +185,19 @@ impl LookupService {
         }
 
         results.sort_by(|a, b| {
-            let len_cmp = b.span_chars.end.cmp(&a.span_chars.end);
+            let len_cmp = b.0.span_chars.end.cmp(&a.0.span_chars.end);
             if len_cmp != std::cmp::Ordering::Equal {
                 return len_cmp;
             }
 
-            let prio_a = dict_configs.get(&a.source).map(|(_, p)| *p).unwrap_or(999);
-            let prio_b = dict_configs.get(&b.source).map(|(_, p)| *p).unwrap_or(999);
+            let prio_a = dict_configs
+                .get(&a.0.source)
+                .map(|(_, p)| *p)
+                .unwrap_or(999);
+            let prio_b = dict_configs
+                .get(&b.0.source)
+                .map(|(_, p)| *p)
+                .unwrap_or(999);
 
             let prio_cmp = prio_a.cmp(&prio_b);
             if prio_cmp != std::cmp::Ordering::Equal {
@@ -192,8 +211,8 @@ impl LookupService {
                     None => 0,
                 }
             };
-            get_val(b.source_sorting_frequency.as_ref())
-                .cmp(&get_val(a.source_sorting_frequency.as_ref()))
+            get_val(b.0.source_sorting_frequency.as_ref())
+                .cmp(&get_val(a.0.source_sorting_frequency.as_ref()))
         });
 
         results
