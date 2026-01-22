@@ -2309,8 +2309,17 @@ fn update_server_conf_local_source(app: &AndroidApp, files_dir: &Path) {
     // Construct the target directory
     let target_path = format!("{}/Mangatan/local-sources", path_rust);
 
-    if let Err(e) = std::fs::create_dir_all(&target_path) {
-        error!("Failed to create local sources dir: {:?}", e);
+    if let Err(err) = std::fs::create_dir_all(&target_path) {
+        error!("Failed to create local sources dir: {err:?}");
+    }
+
+    let nomedia_path = format!("{target_path}/.nomedia");
+    if !std::path::Path::new(&nomedia_path).exists() {
+        if let Err(err) = std::fs::File::create(&nomedia_path) {
+            error!("Failed to create .nomedia in local-sources: {err:?}");
+        } else {
+            info!("✅ Created .nomedia in local-sources");
+        }
     }
 
     // 2. Read server.conf
