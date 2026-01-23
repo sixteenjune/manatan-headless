@@ -15,7 +15,7 @@ pub mod state;
 
 use handlers::{
     import_handler, install_defaults_handler, list_dictionaries_handler, lookup_handler,
-    manage_dictionaries_handler, reset_db_handler,
+    manage_dictionaries_handler, reset_db_handler, unload_handler,
 };
 use lookup::LookupService;
 use state::AppState;
@@ -72,6 +72,7 @@ pub fn create_router(data_dir: PathBuf, auto_install: bool) -> Router {
         .route("/reset", post(reset_db_handler))
         .route("/manage", post(manage_dictionaries_handler))
         .route("/install-defaults", post(install_defaults_handler))
+        .route("/unload", post(unload_handler))
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(limit))
         .layer(RequestBodyLimitLayer::new(limit))

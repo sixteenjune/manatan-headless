@@ -1,4 +1,5 @@
 // #![cfg(target_os = "ios")]
+
 use std::{
     ffi::CStr,
     net::SocketAddr,
@@ -84,51 +85,51 @@ pub unsafe extern "C" fn start_rust_server(
     let bundle = PathBuf::from(bundle_str);
 
     thread::spawn(move || {
-        let rt = Runtime::new().expect("Should be able to get tokio runtime");
+        let rt = tokio::runtime::Builder::new_current_thread() // <--- Key Change
+            .enable_all()
+            .build()
+            .expect("Should be able to get tokio runtime");
+
         rt.block_on(async {
+            // Spawn the health check as a task within the SAME runtime
+            tokio::spawn(async {
+                run_health_check_loop().await;
+            });
+
+            // Run the server on the main task
             if let Err(e) = start_web_server(bundle, docs, version_str).await {
                 error!("❌ Axum Server failed: {}", e);
             }
         });
     });
+}
 
-    // 2. Spawn Health Polling Loop
-    thread::spawn(move || {
-        let rt = Runtime::new().expect("Failed to build Tokio runtime");
-        rt.block_on(async {
-            let client = Client::new();
-            // Simple query to verify GraphQL is up and responding
-            let query_payload = r#"{"query": "{ __schema { queryType { name } } }"}"#;
+async fn run_health_check_loop() {
+    let client = Client::new();
+    let query_payload = r#"{"query": "{ __schema { queryType { name } } }"}"#;
 
-            loop {
-                let request = client
-                    .post("http://127.0.0.1:4568/api/graphql")
-                    .header("Content-Type", "application/json")
-                    .body(query_payload);
+    loop {
+        let request = client
+            .post("http://127.0.0.1:4568/api/graphql")
+            .header("Content-Type", "application/json")
+            .body(query_payload);
 
-                match request.send().await {
-                    Ok(resp)
-                        if resp.status().is_success()
-                            || resp.status() == StatusCode::UNAUTHORIZED =>
-                    {
-                        if !SERVER_READY.load(Ordering::Relaxed) {
-                            info!("✅ [POLL] Server detected! Signaling UI to load...");
-                            SERVER_READY.store(true, Ordering::Relaxed);
-                        }
-                    }
-                    _ => {
-                        if SERVER_READY.load(Ordering::Relaxed) {
-                            warn!(
-                                "⚠️ [POLL] Server lost connection! Signaling UI to show loading..."
-                            );
-                            SERVER_READY.store(false, Ordering::Relaxed);
-                        }
-                    }
+        match request.send().await {
+            Ok(resp) if resp.status().is_success() || resp.status() == StatusCode::UNAUTHORIZED => {
+                if !SERVER_READY.load(Ordering::Relaxed) {
+                    info!("✅ [POLL] Server detected! Signaling UI to load...");
+                    SERVER_READY.store(true, Ordering::Relaxed);
                 }
-                tokio::time::sleep(Duration::from_secs(2)).await;
             }
-        });
-    });
+            _ => {
+                if SERVER_READY.load(Ordering::Relaxed) {
+                    warn!("⚠️ [POLL] Server lost connection! Signaling UI to show loading...");
+                    SERVER_READY.store(false, Ordering::Relaxed);
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
 }
 
 async fn start_web_server(

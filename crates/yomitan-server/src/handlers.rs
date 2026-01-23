@@ -1,3 +1,4 @@
+use crate::{PREBAKED_DICT, ServerState, import};
 use axum::{
     Json,
     extract::{Multipart, Query, State},
@@ -5,10 +6,15 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, Value as JsonValue, json};
+use std::collections::HashMap;
 use tracing::{error, info};
 use wordbase_api::{DictionaryId, Record, Term, dict::yomitan::GlossaryTag};
-use std::collections::HashMap;
-use crate::{PREBAKED_DICT, ServerState, import};
+
+#[cfg(target_os = "ios")]
+unsafe extern "C" {
+    fn malloc_default_zone() -> *mut std::ffi::c_void;
+    fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize);
+}
 
 #[derive(Deserialize)]
 pub struct LookupParams {
@@ -143,6 +149,31 @@ pub async fn manage_dictionaries_handler(
     }
 }
 
+pub async fn unload_handler(State(state): State<ServerState>) -> Json<Value> {
+    info!("♻️ [Memory] Unload requested...");
+
+    // 1. Drop the heavy Rust struct (Logical Free)
+    // This destroys the Vectors holding the 280MB data.
+    state.lookup.unload_tokenizer();
+
+    // 2. FORCE SYSTEM ALLOCATOR PURGE (Physical Free)
+    // We tell iOS: "We just freed a ton of memory. Please release the cached pages to the OS now."
+    #[cfg(any(target_os = "ios"))]
+    unsafe {
+        info!("🧹 [Memory] Triggering iOS malloc_zone_pressure_relief...");
+        let zone = malloc_default_zone();
+        if !zone.is_null() {
+            // goal = 0 means "free as much as possible"
+            malloc_zone_pressure_relief(zone, 0);
+        }
+    }
+
+    // Optional: Log memory stats if you want to verify in console
+    info!("✅ [Memory] Unload & Purge complete.");
+
+    Json(json!({ "status": "ok", "message": "Tokenizer unloaded and memory purged" }))
+}
+
 pub async fn install_defaults_handler(State(state): State<ServerState>) -> Json<Value> {
     let app_state = state.app.clone();
 
@@ -250,7 +281,7 @@ pub async fn lookup_handler(
 
     let mut map: Vec<Aggregator> = Vec::new();
 
-    let mut freq_map: HashMap<(String, String), Vec<ApiFrequency>> = HashMap::new(); 
+    let mut freq_map: HashMap<(String, String), Vec<ApiFrequency>> = HashMap::new();
 
     let mut flat_results: Vec<ApiGroupedResult> = Vec::new();
 
@@ -312,7 +343,6 @@ pub async fn lookup_handler(
                 .entry((headword.clone(), reading.clone()))
                 .or_default()
                 .push(freq_obj);
-
         } else {
             // === DEFINITION LOGIC ===
             let def_obj = ApiDefinition {
@@ -363,26 +393,35 @@ pub async fn lookup_handler(
         }
     }
 
-    
     if should_group {
-        let final_results = map.into_iter().map(|mut agg| {
-            // Attach frequencies if they exist for this word
-            if let Some(freqs) = freq_map.get(&(agg.headword.clone(), agg.reading.clone())) {
-                agg.frequencies.extend(freqs.clone());
-            }
-            
-            ApiGroupedResult {
-                headword: agg.headword,
-                reading: agg.reading,
-                furigana: agg.furigana,
-                definitions: agg.definitions,
-                frequencies: agg.frequencies,
-                term_tags: agg.term_tags,
-                forms: agg.forms_set.into_iter().map(|(h, r)| ApiForm { headword: h, reading: r }).collect(),
-                match_len: agg.match_len,
-            }
-        }).collect();
-        
+        let final_results = map
+            .into_iter()
+            .map(|mut agg| {
+                // Attach frequencies if they exist for this word
+                if let Some(freqs) = freq_map.get(&(agg.headword.clone(), agg.reading.clone())) {
+                    agg.frequencies.extend(freqs.clone());
+                }
+
+                ApiGroupedResult {
+                    headword: agg.headword,
+                    reading: agg.reading,
+                    furigana: agg.furigana,
+                    definitions: agg.definitions,
+                    frequencies: agg.frequencies,
+                    term_tags: agg.term_tags,
+                    forms: agg
+                        .forms_set
+                        .into_iter()
+                        .map(|(h, r)| ApiForm {
+                            headword: h,
+                            reading: r,
+                        })
+                        .collect(),
+                    match_len: agg.match_len,
+                }
+            })
+            .collect();
+
         Ok(Json(final_results))
     } else {
         // Iterate through results and attach frequencies to ALL of them.
@@ -391,7 +430,7 @@ pub async fn lookup_handler(
                 res.frequencies.extend(freqs.clone());
             }
         }
-        
+
         Ok(Json(flat_results))
     }
 }

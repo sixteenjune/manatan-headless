@@ -117,6 +117,11 @@ int main(int argc, char * argv[]) {
     options[optCount++].optionString = "-Xverify:none";
     options[optCount++].optionString = "-Xmx256m";
     options[optCount++].optionString = "-XX:+UseSerialGC";
+    options[optCount++].optionString = "-XX:MaxHeapFreeRatio=40"; 
+    options[optCount++].optionString = "-XX:MinHeapFreeRatio=10";  
+    options[optCount++].optionString = "-XX:MaxMetaspaceSize=128m";
+    options[optCount++].optionString = "-XX:CompressedClassSpaceSize=32m";
+    options[optCount++].optionString = "-Xss512k";
     options[optCount++].optionString = "-XX:-TieredCompilation"; 
     options[optCount++].optionString = "-Dos.name=Linux";
     options[optCount++].optionString = "-Dos.version=5.15.0";

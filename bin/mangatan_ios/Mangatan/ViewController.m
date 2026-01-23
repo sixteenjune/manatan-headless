@@ -55,6 +55,11 @@
     // Seed Cookies
     [self seedCookiesFromDisk];
 
+    [[NSNotificationCenter defaultCenter] addObserver:self 
+                                             selector:@selector(handleEnterBackground) 
+                                                 name:UIApplicationDidEnterBackgroundNotification 
+                                               object:nil];    
+
     // Start Timer
     self.statusTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
                                                         target:self
@@ -203,6 +208,13 @@
     }];
     self.wasReady = NO;
     [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"about:blank"]]];
+}
+
+- (void)handleEnterBackground {
+    NSURL *url = [NSURL URLWithString:@"http://127.0.0.1:4568/api/yomitan/unload"];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    [req setHTTPMethod:@"POST"];
+    [[NSURLSession.sharedSession dataTaskWithRequest:req] resume];
 }
 
 @end
