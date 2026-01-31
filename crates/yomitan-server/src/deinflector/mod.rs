@@ -3,6 +3,7 @@ mod chinese;
 mod english;
 mod japanese;
 mod korean;
+mod spanish;
 pub mod transformer;
 
 #[cfg(test)]
@@ -17,6 +18,7 @@ pub enum Language {
     Korean,
     Chinese,
     Arabic,
+    Spanish,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +28,7 @@ pub struct Deinflector {
     korean: LanguageTransformer,
     chinese: LanguageTransformer,
     arabic: LanguageTransformer,
+    spanish: LanguageTransformer,
 }
 
 impl Deinflector {
@@ -36,6 +39,7 @@ impl Deinflector {
             korean: korean::transformer(),
             chinese: chinese::transformer(),
             arabic: arabic::transformer(),
+            spanish: spanish::transformer(),
         }
     }
 
@@ -46,6 +50,7 @@ impl Deinflector {
             Language::Korean => korean::deinflect(&self.korean, text),
             Language::Chinese => self.chinese.deinflect_terms(text),
             Language::Arabic => self.arabic.deinflect_terms(text),
+            Language::Spanish => self.spanish.deinflect_terms(text),
         }
     }
 }
