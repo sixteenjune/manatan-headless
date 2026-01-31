@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use super::transformer::LanguageTransformer;
-use super::{english, japanese, korean};
+use super::{arabic, english, japanese, korean};
 
 #[derive(Deserialize)]
 struct TestSuite {
@@ -160,6 +160,25 @@ fn korean_deinflections() {
     );
     println!(
         "Korean deinflector: {}/{} passed",
+        summary.passed, summary.total
+    );
+}
+
+#[test]
+fn arabic_deinflections() {
+    let transformer = arabic::transformer();
+    let suites: Vec<TestSuite> = serde_json::from_str(include_str!("test-data/arabic-tests.json"))
+        .expect("arabic tests should deserialize");
+    let mut summary = TestSummary::default();
+    run_language_tests(
+        "Arabic",
+        &transformer,
+        &suites,
+        arabic::strip_diacritics,
+        &mut summary,
+    );
+    println!(
+        "Arabic deinflector: {}/{} passed",
         summary.passed, summary.total
     );
 }
