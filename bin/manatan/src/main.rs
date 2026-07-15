@@ -595,9 +595,34 @@ fn is_dir_empty(path: &Path) -> bool {
     }
 }
 
+fn has_graphical_display() -> bool {
+    if cfg!(target_os = "linux") {
+        env::var_os("WAYLAND_DISPLAY").is_some()
+            || env::var_os("WAYLAND_SOCKET").is_some()
+            || env::var_os("DISPLAY").is_some()
+    } else {
+        true
+    }
+}
+
 fn main() -> eframe::Result<()> {
-    if manatan_server_public::cef_app::try_handle_subprocess() {
-        return Ok(());
+    // Early detection: prefer explicit environment variable so Docker/compose can
+    // force headless mode without relying on CLI parsing. We avoid calling any
+    // GUI-related or winit-initializing code when headless is requested.
+    let headless_env = match env::var_os("MANATAN_HEADLESS") {
+        Some(val) => {
+            let s = val.to_string_lossy().to_ascii_lowercase();
+            matches!(s.as_str(), "1" | "true" | "yes" | "on")
+        }
+        None => false,
+    };
+
+    // If not forced headless via env, allow CEF subprocess handling early as
+    // before; but when forced headless, skip subprocess GUI wiring entirely.
+    if !headless_env {
+        if manatan_server_public::cef_app::try_handle_subprocess() {
+            return Ok(());
+        }
     }
 
     let args = Cli::parse();
@@ -616,14 +641,22 @@ fn main() -> eframe::Result<()> {
 
     let host = args.host;
     let port = args.port;
+    let open_page = args.open_page;
 
-    if args.headless {
+    // Effective headless: env var override OR CLI flag OR missing display backends
+    let headless = headless_env || args.headless || !has_graphical_display();
+
+    if headless && !args.headless && !headless_env {
+        warn!("No graphical display backend detected; falling back to headless mode.");
+    }
+
+    if headless {
         info!("👻 Starting in Headless Mode (No GUI)...");
 
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
         rt.block_on(async {
-            if args.open_page {
+            if open_page {
                 tokio::spawn(async move { open_webpage_when_ready(host, port).await });
             }
 
